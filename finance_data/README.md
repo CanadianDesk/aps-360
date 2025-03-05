@@ -1,4 +1,6 @@
-File descriptions
+# File descriptions
+
+## Relevant for all industries
 
 daily-treasury-rates.csv
 - contains daily treasury long-term rates for each day from 2024
@@ -10,3 +12,6 @@ fed-funds-rate-historical-chart.csv
 - data is YYYY-MM-DD | rate value
 - sourced from https://www.macrotrends.net/2015/fed-funds-rate-historical-chart#google_vignette
 
+
+
+## Finance specific
