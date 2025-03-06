@@ -220,7 +220,7 @@ def process_name(name, ticker):
   formatted_articles = [
     {
       "url": article["url"],
-      "title": article["title"],
+      "headline": article["title"],
       "date": clean_date(article["seendate"]),
     }
     for article in new_articles
