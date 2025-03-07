@@ -35,10 +35,10 @@ def calculate_daily_deviations(weather_data_file, daily_averages_file, output_fi
         suffixes=('', '_AVG')
     )
     
-    # Calculate absolute deviations
-    print("Calculating absolute deviations for each day...")
+    # Calculate actual deviations (not absolute)
+    print("Calculating actual deviations for each day...")
     for column in ['TMIN', 'TMAX', 'AWND', 'PRCP']:
-        merged_df[f'{column}_DEV'] = (merged_df[column] - merged_df[f'{column}_AVG']).abs()
+        merged_df[f'{column}_DEV'] = merged_df[column] - merged_df[f'{column}_AVG']
     
     # Calculate a combined deviation metric (optional)
     # Normalize each deviation by its typical range to make them comparable
@@ -54,9 +54,10 @@ def calculate_daily_deviations(weather_data_file, daily_averages_file, output_fi
             merged_df[f'{column}_DEV_NORM'] = 0
     
     # Combined deviation score (average of normalized deviations)
+    # Note: Using absolute values for the combined deviation to measure total deviation magnitude
     merged_df['COMBINED_DEV'] = merged_df[[
         'TMIN_DEV_NORM', 'TMAX_DEV_NORM', 'AWND_DEV_NORM', 'PRCP_DEV_NORM'
-    ]].mean(axis=1)
+    ]].abs().mean(axis=1)
     
     # Select columns for the output
     output_columns = [
@@ -80,16 +81,17 @@ def calculate_daily_deviations(weather_data_file, daily_averages_file, output_fi
     return result_df, extreme_days
 
 def find_extreme_days(result_df):
-    """Find the most extreme days in the dataset based on combined deviation"""
+    """Find the most extreme days in the dataset based on deviation"""
     # Find days with the highest combined deviation
     extreme_days = {}
     
-    # Most extreme day overall
+    # Most extreme day overall (by magnitude of combined deviation)
     extreme_days['highest_combined'] = result_df.loc[result_df['COMBINED_DEV'].idxmax()]
     
-    # Most extreme days for each metric
+    # Most extreme days for each metric (both highest positive and negative deviations)
     for column in ['TMIN', 'TMAX', 'AWND', 'PRCP']:
         extreme_days[f'highest_{column}'] = result_df.loc[result_df[f'{column}_DEV'].idxmax()]
+        extreme_days[f'lowest_{column}'] = result_df.loc[result_df[f'{column}_DEV'].idxmin()]
     
     return extreme_days
 
@@ -120,7 +122,11 @@ def main():
         print("\nMost extreme weather days:")
         for key, day in extreme_days.items():
             date_str = day['DATE'].split()[0] if isinstance(day['DATE'], str) else day['DATE'].strftime('%Y-%m-%d')
-            print(f"Highest {key.split('_')[1]}: {date_str} with deviation of {day[key.split('_')[1] + '_DEV']:.2f}")
+            dev_metric = key.split('_')[1] + '_DEV'
+            if key.startswith('lowest_'):
+                print(f"Lowest {key.split('_')[1]}: {date_str} with deviation of {day[dev_metric]:.2f}")
+            else:
+                print(f"Highest {key.split('_')[1]}: {date_str} with deviation of {day[dev_metric]:.2f}")
         
     except Exception as e:
         print(f"Error: {e}")
