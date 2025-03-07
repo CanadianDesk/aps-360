@@ -2,10 +2,10 @@
 
 ## Relevant for all industries
 
-daily-treasury-rates.csv
-- contains daily treasury long-term rates for each day from 2024
-- data is MM/DD/YYYY | LT Composite (>10 Yrs) | TREASURY 20-Yr CMT
-- sourced from https://home.treasury.gov/resource-center/data-chart-center/interest-rates/TextView?type=daily_treasury_long_term_rate&field_tdr_date_value=2024
+yield-curve-rates-1990-2024-cleaned.csv
+- contains daily treasury par-yield curve rates for each market day from 07/31/01-2024
+- data is MM/DD/YY | LT Composite (>10 Yrs) | TREASURY 20-Yr CMT | Extrapolation Factor
+- sourced from https://home.treasury.gov/interest-rates-data-csv-archive
 
 fed-funds-rate-historical-chart.csv
 - contains daily interest rates for each day since July 1, 1954
