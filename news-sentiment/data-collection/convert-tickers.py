@@ -71,7 +71,7 @@ if __name__ == "__main__":
   #   json.dump([], file)
   # print("Successfully emptied names.json")
 
-  num_tickers = 10
+  num_tickers = None
   process_tickers(num_tickers)
 
   # empty tickers file
