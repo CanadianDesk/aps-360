@@ -10,6 +10,9 @@ from urllib.parse import urlencode
 # DOCUMENTATION:
 # https://blog.gdeltproject.org/gdelt-doc-2-0-api-debuts/
 
+# Global configuration
+SKIP_TONES = True  # Set to True to skip fetching tone data
+
 # API Endpoint
 GDELT_URL = "http://api.gdeltproject.org/api/v2/doc/doc"
 
@@ -87,7 +90,7 @@ def split_date_range(start_date, end_date, segments=12):
 def fetch_news(name, start_date, end_date):
     """Fetch news data with rate-limiting and retries across multiple date segments."""
     # Split the date range into 12 segments
-    date_segments = split_date_range(start_date, end_date, 98)
+    date_segments = split_date_range(start_date, end_date, 200)
     all_articles = []
     
     for i, (segment_start, segment_end) in enumerate(date_segments):
@@ -297,12 +300,14 @@ def add_tones_to_articles(articles, tones_data):
     
     return articles_with_tones, articles_with_tone_values
 
-def append_to_data_csv(articles_with_tones):
-    """Append articles with tones to data.csv."""
+def append_to_data_csv(articles):
+    """Append all articles to data.csv, not just ones with tones."""
     with open(DATA_CSV, 'a', newline='', encoding='utf-8') as f:
         writer = csv.writer(f, quoting=csv.QUOTE_ALL)
-        for article in articles_with_tones:
-            writer.writerow([article["date"], article["headline"], article["tone"]]) #modify back
+        for article in articles:
+            # Use empty string for tone if it doesn't exist
+            tone = article.get("tone", "")
+            writer.writerow([article["date"], article["headline"], tone])
 
 def save_news(ticker, news_list):
     """Save news data to file."""
@@ -331,6 +336,7 @@ def process_name(name, ticker, start_date, end_date):
             "url": article["url"],
             "headline": fix_text_formatting(article["title"]),  # Apply formatting at creation
             "date": clean_date(article["seendate"]),
+            "tone": None  # Initialize tone as None
         }
         for article in new_articles
     ]
@@ -344,36 +350,44 @@ def process_name(name, ticker, start_date, end_date):
     removed_count = len(formatted_articles) - len(cleaned_articles)
     print(f"Cleaned {removed_count} duplicate articles. Remaining: {len(cleaned_articles)}")
     
-    # Get tone data across all segments
-    tones_data, tones_error = get_tones(name, start_date, end_date)
+    # Get tone data only if not skipping tones
+    toned_count = 0
     
-    # If we encountered an error, skip this ticker
-    if tones_error:
-        print(f"Skipping '{name}' due to persistent errors in fetching tones.")
-        return 0, 0
+    if not SKIP_TONES:
+        # Get tone data across all segments
+        tones_data, tones_error = get_tones(name, start_date, end_date)
+        
+        # If we encountered an error, we'll still continue but without tones
+        if not tones_error:
+            # Add tone information to articles
+            all_articles_with_tones, articles_with_tone_values = add_tones_to_articles(cleaned_articles, tones_data)
+            
+            # Count how many articles got tones
+            toned_count = len(articles_with_tone_values)
+            
+            print(f"Found tones for {toned_count}/{len(cleaned_articles)} articles ({toned_count/len(cleaned_articles)*100:.1f}% if available).")
+            
+            # Update cleaned_articles to include tones
+            cleaned_articles = all_articles_with_tones
+        else:
+            print(f"Warning: Failed to fetch tones for '{name}'. Continuing without tones.")
+    else:
+        print("Skipping tone fetching as per configuration.")
     
-    # Add tone information to articles
-    all_articles_with_tones, articles_with_tone_values = add_tones_to_articles(cleaned_articles, tones_data)
-    
-    # Count how many articles got tones
-    toned_count = len(articles_with_tone_values)
-    
-    # Append articles with tones to data.csv
-    if toned_count > 0:
-        append_to_data_csv(articles_with_tone_values)
-        print(f"Added {toned_count} articles with tones to data.csv")
+    # Append all articles to data.csv (with or without tones)
+    append_to_data_csv(cleaned_articles)
+    print(f"Added {len(cleaned_articles)} articles to data.csv")
     
     # Sort articles by date (oldest first)
-    all_articles_with_tones.sort(key=lambda x: x["date"], reverse=False)
+    cleaned_articles.sort(key=lambda x: x["date"], reverse=False)
     
     # Append and sort the combined list by date
-    updated_news = existing_news + all_articles_with_tones
+    updated_news = existing_news + cleaned_articles
     updated_news.sort(key=lambda x: x["date"], reverse=False)
     
     # Save sorted news
     save_news(ticker, updated_news)
 
-    print(f"Found tones for {toned_count}/{len(cleaned_articles)} articles ({toned_count/len(cleaned_articles)*100:.1f}% if available).")
     print(f"Saved {len(cleaned_articles)} new articles for '{name}'. Total in database: {len(updated_news)}")
     
     return len(cleaned_articles), len(updated_news)
@@ -392,6 +406,7 @@ def main(start_date="20240101000000", end_date="20250101000000"):
     
     print(f"Found {len(names)} names to process.")
     print(f"Processing data from {start_date} to {end_date}")
+    print(f"Tone fetching is {'disabled' if SKIP_TONES else 'enabled'}")
     
     # Track statistics
     total_new_articles = 0
@@ -430,7 +445,7 @@ def main(start_date="20240101000000", end_date="20250101000000"):
     if skipped_tickers:
         print(f"Skipped {len(skipped_tickers)} tickers due to errors: {', '.join(skipped_tickers)}")
     print(f"Article files stored in: {ARTICLES_DIR}")
-    print(f"Articles with tones saved to: {DATA_CSV}")
+    print(f"Articles saved to: {DATA_CSV}")
 
 if __name__ == "__main__":
     # Call main with default date range or customize as needed

@@ -1,8 +1,15 @@
 import pandas as pd
+import csv
 
 def process_csv(input_file, output_file):
-    # Read the CSV file
-    df = pd.read_csv(input_file)
+    # Read the CSV file with more robust parsing options
+    df = pd.read_csv(
+        input_file,
+        engine='python',  # More flexible parser
+        quotechar='"',    # Specify quote character
+        escapechar='\\',  # Handle escaped characters
+        on_bad_lines='warn'  # Warn about problematic lines
+    )
     
     # Convert date column to datetime for proper sorting
     df['date'] = pd.to_datetime(df['date'])
@@ -13,8 +20,8 @@ def process_csv(input_file, output_file):
     # Drop the headline column
     df = df.drop('headline', axis=1)
     
-    # Group by date and average the labels
-    df = df.groupby('date').mean().reset_index()
+    # Group by date and sum the labels
+    df = df.groupby('date').sum().reset_index()
     
     # Convert date back to string format YYYY-MM-DD
     df['date'] = df['date'].dt.strftime('%Y-%m-%d')

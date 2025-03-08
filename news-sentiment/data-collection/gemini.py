@@ -12,7 +12,7 @@ def load_prompt():
     with open("./prompt.md", "r") as f:
         return f.read()
 
-def read_csv_in_batches(filepath, batch_size=150):
+def read_csv_in_batches(filepath, batch_size=120):
     """Generator to read CSV file in batches."""
     with open(filepath, 'r', newline='') as f:
         reader = csv.reader(f)
@@ -32,6 +32,22 @@ def read_csv_in_batches(filepath, batch_size=150):
 def csv_to_string(csv_data):
     """Convert CSV data to a string format."""
     return "\n".join([",".join(row) for row in csv_data])
+
+def file_exists_with_content(filepath):
+    """Check if a file exists and has content beyond just a header row."""
+    if not os.path.exists(filepath):
+        return False
+    
+    try:
+        with open(filepath, 'r', newline='') as f:
+            reader = csv.reader(f)
+            # Try to read header and at least one row
+            next(reader)  # Header
+            next(reader)  # First data row
+            return True
+    except (StopIteration, FileNotFoundError):
+        # StopIteration means there's no data row (only header or empty)
+        return False
 
 def write_results_to_csv(results, output_file, append=False):
     """Write the Gemini results to a CSV file."""
@@ -127,8 +143,12 @@ def process_csv():
     """Process the CSV file in batches."""
     prompt_template = load_prompt()
     batch_num = 0
+    output_file = "./tsla_gemini.csv"
     
-    for batch in read_csv_in_batches("./tsla_stripped.csv", batch_size=150):
+    # Check if the output file already exists and has data
+    file_has_data = file_exists_with_content(output_file)
+    
+    for batch in read_csv_in_batches("./tsla_stripped.csv", batch_size=120):
         # Convert the batch to a string and replace <csv data> in the prompt
         csv_string = csv_to_string(batch)
         current_prompt = prompt_template.replace("<csv data>", csv_string)
@@ -137,10 +157,13 @@ def process_csv():
         print(f"Processing batch {batch_num + 1} with {len(batch) - 1} rows of data...")
         results = generate_with_backoff(current_prompt)
         
-        # Write results to CSV
-        write_results_to_csv(results, "./tsla_gemini.csv", append=(batch_num > 0))
+        # Write results to CSV - append if file already has data or if not the first batch
+        should_append = file_has_data or batch_num > 0
+        write_results_to_csv(results, output_file, append=should_append)
         
         batch_num += 1
+        # After the first batch is written, the file definitely has data
+        file_has_data = True
     
     print(f"CSV processing complete. Processed {batch_num} batches.")
 
