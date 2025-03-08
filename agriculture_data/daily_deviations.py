@@ -1,3 +1,9 @@
+"""
+Takes in the daily averages from 1990-2025 from Sioux City Iowa, and then the Averages from thate given timeline
+outputes weather_deviations in ./results where the value is how much it deviates from the averge to the 
++ or - side.
+"""
+
 import pandas as pd
 import numpy as np
 from datetime import datetime
