@@ -54,7 +54,7 @@ class HeadlineDataset(Dataset):
       vectors.extend([np.zeros(self.vector_size)] * (self.max_length - len(vectors)))
     
     # convert to tensors
-    vectors = torch.FloatTensor(vectors)
+    vectors = torch.FloatTensor(np.array(vectors))
     sentiment = torch.FloatTensor([sentiment])
     
     return vectors, sentiment
@@ -256,7 +256,7 @@ def run_experiments():
   
   record_df = pd.read_csv(csv_file_path)
 
-  print("record df", record_df)
+  # print("record df", record_df)
   
   # find the first row with missing evaluation metrics
   next_row = None
