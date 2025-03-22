@@ -18,6 +18,7 @@ torchtext.disable_torchtext_deprecation_warning()  # silence the annoying warnin
 import torchtext.vocab as vocab
 import optuna  # Add Optuna for hyperparameter optimization
 import json
+import onnx
 
 
 # downloading the tokenizer
@@ -719,12 +720,116 @@ def label_csv_headlines_with_inference():
       continue
   return
 
+def save_model_as_pth(trial_number):
+  '''
+  Save the model as a .pth file instead of just a state dictionary
+  '''
+  # load the model
+  if not os.path.exists(TRIALS_CSV):
+    raise FileNotFoundError(f"Trials file not found: {TRIALS_CSV}")
+  
+  trials_df = pd.read_csv(TRIALS_CSV)
+  if trial_number not in trials_df['trial_number'].values:
+    raise ValueError(f"Trial {trial_number} not found in trials file")
+  
+  trial_data = trials_df[trials_df['trial_number'] == trial_number].iloc[0]
+  
+  # Load model parameters
+  hidden_dim = int(trial_data['hidden_dim'])
+  num_layers = int(trial_data['num_layers'])
+  dropout = trial_data['dropout']
+  
+  # Load GloVe vectors
+  glove_vectors = load_glove_vectors(200)
+  embedding_dim = 200
+
+  # Create model
+  model = BiLSTMSentiment(embedding_dim, hidden_dim, num_layers=num_layers, dropout=dropout)   
+
+  # Load model state
+  model_path = f'./{STATE_FOLDER}/model_trial_{trial_number}.pt'
+  if not os.path.exists(model_path):
+    raise FileNotFoundError(f"Model file not found: {model_path}")  
+  
+  model.load_state_dict(torch.load(model_path))
+
+  # Save model as .pth file
+  torch.save(model, f'./best_model_trial_{trial_number}.pth')
+
+
+def save_model_as_onnx(trial_number):
+  '''
+  saves model as onnx for web deployment
+  '''
+
+  if not os.path.exists(f"./best_model_trial_{trial_number}.pth"):
+    raise FileNotFoundError(f"Model file not found: ./best_model_trial_{trial_number}.pth")
+  
+  model = torch.load(f"./best_model_trial_{trial_number}.pth")
+  model.eval()
+
+  batch_size = 1
+  sequence_length = 128
+  embedding_dim = 200
+
+  dummy_input = torch.randn(batch_size, sequence_length, embedding_dim, requires_grad=False)
+
+  output_path = f"./best_model_trial_{trial_number}.onnx"
+
+  # Export the model to ONNX format
+  torch.onnx.export(
+    model,                  
+    dummy_input,            
+    output_path,            
+    export_params=True,     
+    opset_version=12,       
+    do_constant_folding=True, 
+    input_names=['input'],  
+    output_names=['output'], 
+    dynamic_axes={
+      'input': {0: 'batch_size'},
+      'output': {0: 'batch_size'}
+    }
+  )
+    
+      # Verify the model by checking the exported model with ONNXRuntime
+  try:
+    import onnxruntime as ort
+    
+    # Create an ONNX Runtime session
+    ort_session = ort.InferenceSession(output_path)
+    
+    # Prepare input data
+    input_data = dummy_input.numpy()
+    
+    # Run inference with ONNX Runtime
+    ort_inputs = {ort_session.get_inputs()[0].name: input_data}
+    ort_outputs = ort_session.run(None, ort_inputs)
+    
+    # Get PyTorch model output for comparison
+    torch_output = model(dummy_input).detach().numpy()
+    
+    # Compare outputs
+    import numpy as np
+    np.testing.assert_allclose(torch_output, ort_outputs[0], rtol=1e-03, atol=1e-05)
+    
+    print(f"ONNX model exported successfully to {output_path}")
+    print("ONNX model verified - PyTorch and ONNX Runtime outputs match!")
+  except ImportError:
+    print(f"ONNX model exported successfully to {output_path}")
+    print("Warning: onnxruntime not installed, skipping model verification")
+  except Exception as e:
+    print(f"ONNX model exported successfully to {output_path}")
+    print(f"Warning: ONNX model verification failed: {e}")
+    
+
+
 if __name__ == "__main__":
   # Run optimization with 50 trials
   # run_optuna_optimization(n_trials=50)
 
   # best trial number:
-  # best_trial = 25
+  best_trial = 25
 
   # strings = [
   #   "Stock market soars, Tesla expected to beat earnings.",
@@ -750,4 +855,6 @@ if __name__ == "__main__":
   #   reset = "\033[0m"
   #   print(f"{string}: {color}{inference:.3f}{reset}")
 
-  label_csv_headlines_with_inference()
+  # label_csv_headlines_with_inference()
+  # save_model_as_pth(best_trial)
+  # save_model_as_onnx(best_trial)

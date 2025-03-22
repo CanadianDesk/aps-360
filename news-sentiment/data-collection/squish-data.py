@@ -2,7 +2,7 @@ import pandas as pd
 import csv
 import os
 
-SUM_OUTPUT_DIRECTORY = "../output-sum/" 
+SUM_OUTPUT_DIRECTORY = "../output/" 
 AVG_OUTPUT_DIRECTORY = "../output-avg/"
 SRC_DIRECTORY = "./labeled-articles/"
 
