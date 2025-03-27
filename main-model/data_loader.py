@@ -132,7 +132,7 @@ class EquityDataset(Dataset):
 
         fig.tight_layout()
         plt.title(ticker)
-        # plt.show()
+        plt.show()
         if not os.path.exists(save_path):
             os.makedirs(save_path)
         plt.savefig(os.path.join(save_path, "{}.png".format(ticker)))
