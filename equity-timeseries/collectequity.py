@@ -8,7 +8,21 @@ def collect_and_plot_from_list(list_=['META']):
         eqdc.save(f'./collected_data/{ticker}.csv')
         # eqdc.plot(ticker)
 
+def get_tickers_with_sentiment(path):
+    import os
+    import pandas as pd
+
+    files = os.listdir(path)
+    tickers = []
+    for file in files:
+        if file.endswith(".csv"):
+            tickers.append(file.split(".")[0])
+    return tickers
+
 if __name__ == "__main__":
+
+    available_tickers = get_tickers_with_sentiment("../news-sentiment/output/")
+        
     tech = [
             'AAPL',
             'MSFT',
@@ -34,5 +48,5 @@ if __name__ == "__main__":
             'BBA'
         ]
     collect_and_plot_from_list(
-        tech
+        available_tickers
     )

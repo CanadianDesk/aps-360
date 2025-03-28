@@ -22,7 +22,7 @@ class EquityDataCollector:
         self.data = r.json()
         print(self.data)
 
-    def collect_with_yfinance(self, ticker, days_=(28*13+30)): # 13 months of data
+    def collect_with_yfinance(self, ticker, days_=(365*(13/12))): # 13 months
         
         """
         Fetch stock data for a given ticker and time period using yfinance
