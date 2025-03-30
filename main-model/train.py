@@ -59,6 +59,9 @@ def train_model(model, train_loader, val_loader, num_epochs=10, lr=0.0001, save_
     validation_losses = []
     training_accuracies = []
     validation_accuracies = []
+
+    best_val_loss = float('inf')
+
     for epoch in range(num_epochs):
         model.train()
         running_loss = 0.0
@@ -69,6 +72,7 @@ def train_model(model, train_loader, val_loader, num_epochs=10, lr=0.0001, save_
 
             # Only do loss on the first 4 channels (price, volume, etc.)
             loss = criterion(outputs[:, :, :4], targets[:, :, :4])
+            # loss = criterion(outputs[:, :, 3], targets[:, :, 3])
 
             loss.backward()
             optimizer.step()
@@ -84,12 +88,15 @@ def train_model(model, train_loader, val_loader, num_epochs=10, lr=0.0001, save_
                 loss = criterion(outputs, targets)
                 val_loss += loss.item()
         validation_losses.append(val_loss / len(val_loader))
-        # Save the model
-        if (epoch + 1) % save_interval == 0:
+
+        if validation_losses[-1] < best_val_loss:
+            best_val_loss = validation_losses[-1]
+            # Save the model if validation loss improves
             if not os.path.exists("./cached_models"):
                 os.makedirs("./cached_models")
-            torch.save(model.state_dict(), f"./cached_models/equitymodel_epoch_{epoch+1}.pth")
-            print(f"Model saved at epoch {epoch+1}")
+            torch.save(model.state_dict(), "./cached_models/best_equitymodel.pth")
+            print(f"Model saved at epoch {epoch+1} with validation loss: {best_val_loss:.4f}")
+        
         # Print statistics
         print(f"Epoch {epoch+1} | Training Loss: {training_losses[-1]:.4f} | Validation Loss: {validation_losses[-1]:.4f}")
 
@@ -97,11 +104,14 @@ def train_model(model, train_loader, val_loader, num_epochs=10, lr=0.0001, save_
         
 
 def main():
-    i_wdth = 128
-    o_wdth = 8
-    eqds = EquityDataset(input_width=i_wdth, output_width=o_wdth, include_industry_specific=True, normalize=False)
-    train_loader, val_loader, test_loader = eqds.construct_data_loaders(industry="technology", sample_stride=8, batch_size=32)
-    model = EquityModel(width_k_bar=17, kernel_size=3, input_height=i_wdth, output_height=o_wdth, conv_out_channel_list=[4, 16, 64, 256], pool_type='avg')
+    # note that the input height muse be 256 times the output height
+
+    convolutional_layers = [4, 16, 64, 256, 32, 16, 4, 2]
+    o_ht = 1
+    i_ht = o_ht * (2**len(convolutional_layers))
+    eqds = EquityDataset(input_height=i_ht, output_height=o_ht, include_industry_specific=True, normalize=False)
+    train_loader, val_loader, test_loader = eqds.construct_data_loaders(industry="technology", sample_stride=4, batch_size=32)
+    model = EquityModel(width_k_bar=17, kernel_size=3, input_height=i_ht, output_height=o_ht, conv_out_channel_list=convolutional_layers, pool_type='avg')
     
     # print(train_loader.dataset[0][0].shape)
     # show_tensor_image(train_loader.dataset[0][0], title="First Image in Training Set")
@@ -113,7 +123,7 @@ def main():
     # print("Validation set size:", len(val_loader.dataset))
     # print("Test set size:", len(test_loader.dataset))
 
-    tl, vl, ta, va = train_model(model, train_loader, val_loader, num_epochs=50, lr=0.0001)
+    tl, vl, ta, va = train_model(model, train_loader, val_loader, num_epochs=30, lr=0.0001)
     # Plot training and validation loss
     plt.figure(figsize=(10, 5))
     plt.plot(tl, label='Training Loss', color='blue')

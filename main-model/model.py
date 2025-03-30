@@ -27,12 +27,12 @@ class EquityModel(nn.Module):
         self.output_height = input_height
         for i in range(len(conv_out_channel_list)):
             self.output_height = (self.output_height - kernel_size + 2) // 2
-            # self.output_height = (self.output_height - 1) // 2 + 1 # Pooling layer reduces height by half
-        # Final conv layer reduces channels to 1
-        self.output_height = (self.output_height - kernel_size + 2) // 1
-        # Ensure output height is as expected
+        # Final output height after all convolutions and pooling
+        self.output_height = self.output_height - kernel_size + 1
+        # Check if the final output height matches the expected output height
         # if self.output_height != output_height:
-        #     raise ValueError(f"Output height after convolutions and pooling is {self.output_height}, expected {output_height}")
+        #     raise ValueError("The calculated output height {} does not match the expected output height {}.".format(self.output_height, output_height))
+        # Check if the input width is divisible by the kernel size
         
     def forward(self, x):
         

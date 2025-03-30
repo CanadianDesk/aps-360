@@ -6,7 +6,7 @@ from matplotlib import pyplot as plt
 from torch.utils.data import Dataset, DataLoader
 
 class EquityDataset(Dataset):
-    def __init__(self, root_paths=["../news-sentiment/output/", "../equity-timeseries/collected_data/"], input_width=512, output_width=32, include_industry_specific=True, normalize=False):
+    def __init__(self, root_paths=["../news-sentiment/output/", "../equity-timeseries/collected_data/"], input_height=512, output_height=32, include_industry_specific=True, normalize=False):
 
         self.energy_tickers = [
             "CNQ.TO", "COP", "CVE.TO", "CVX", "DVN", "ENB.TO", "EOG", "HAL", 
@@ -173,9 +173,9 @@ class EquityDataset(Dataset):
             # cache the df for later use
             df.to_csv(f"./cached_images/{industry}/{ticker}.csv", index=False)
 
-        self.input_width = input_width
-        self.output_width = output_width
-        self.sample_window = input_width + output_width
+        self.input_height = input_height
+        self.output_height = output_height
+        self.sample_window = input_height + output_height
 
         self.train_loader = None
         self.val_loader = None
@@ -204,21 +204,26 @@ class EquityDataset(Dataset):
             cnt += 1
             print(f"Loading {ticker}... ({cnt}/{total})")
 
-            # Check if the ticker is in the specified industry
-            if ticker not in designee_tickers: continue
-            # Split the dataframe into samples
-            samples = self.split_df_into_samples(df, sample_window=self.sample_window, sample_stride=sample_stride)
-            num_samples = len(samples)
-            num_train_samples = int(num_samples * 0.8)
-            num_val_samples = int(num_samples * 0.1)
-            num_test_samples = int(num_samples * 0.1)
-
-            # Split the samples into train, val, and test sets by random stratified sampling
-            np.random.shuffle(samples)
-            train_data += samples[:num_train_samples]
-            val_data += samples[num_train_samples:num_train_samples + num_val_samples]
-            test_data += samples[num_train_samples + num_val_samples:num_train_samples + num_val_samples + num_test_samples]
-
+            if ticker not in designee_tickers: 
+                continue
+                
+            # Sort by date
+            df = df.sort_values(by="Date")
+            
+            # Define split points (e.g., 80% train, 10% val, 10% test)
+            train_idx = int(len(df) * 0.8)
+            val_idx = int(len(df) * 0.9)
+            
+            # Split data chronologically
+            train_df = df.iloc[:train_idx]
+            val_df = df.iloc[train_idx:val_idx]
+            test_df = df.iloc[val_idx:]
+            
+            # Create samples for each split
+            train_data.extend(self.split_df_into_samples(train_df, sample_stride=sample_stride))
+            val_data.extend(self.split_df_into_samples(val_df, sample_stride=sample_stride))
+            test_data.extend(self.split_df_into_samples(test_df, sample_stride=sample_stride))
+            
         # Create DataLoader objects
         self.train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True)
         self.val_loader = DataLoader(val_data, batch_size=batch_size, shuffle=False)
@@ -246,10 +251,10 @@ class EquityDataset(Dataset):
             # Drop the date column
             sample = sample.drop(columns=["Date"])
             if normalize:
-                # normalize the sample based on the first input_width values
+                # normalize the sample based on the first input_height values
                 for col in sample.columns:
-                    min_val = sample[col][:self.input_width].min()
-                    max_val = sample[col][:self.input_width].max()
+                    min_val = sample[col][:self.input_height].min()
+                    max_val = sample[col][:self.input_height].max()
                     if max_val - min_val != 0:  # Avoid division by zero
                         sample.loc[:, col] = (sample[col] - min_val) / (max_val - min_val)
                     else:
@@ -257,8 +262,8 @@ class EquityDataset(Dataset):
             # convert the sample to a tensor
             sample = torch.tensor(sample.values, dtype=torch.float32)
             # make it an input, target pair
-            input_sample = sample[:self.input_width, 1:]
-            target_sample = sample[self.input_width:, 1:]
+            input_sample = sample[:self.input_height, 1:]
+            target_sample = sample[self.input_height:, 1:]
             # add the sample to the list
             samples.append((input_sample, target_sample))  # Add channel dimension for target
         # return the samples as a list of tuples
