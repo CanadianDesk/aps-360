@@ -181,9 +181,16 @@ class EquityDataset(Dataset):
         self.val_loader = None
         self.test_loader = None
 
-    def construct_data_loaders(self, industry="technology", sample_stride=1):
+    def construct_data_loaders(self, industry="technology", sample_stride=8, batch_size=32):
         if industry not in ["technology", "energy", "agriculture"]:
             raise ValueError("Invalid industry specified. Choose from 'technology', 'energy', or 'agriculture'.")
+        
+        if os.path.exists(f"./cached_data_loaders/{industry}.pt"):
+            print(f"Loading cached data loaders for {industry}...")
+            data_loaders = torch.load(f"./cached_data_loaders/{industry}.pt", weights_only=False)
+            self.train_loader, self.val_loader, self.test_loader = data_loaders
+            return self.train_loader, self.val_loader, self.test_loader
+        
         train_data = []
         val_data = []
         test_data = []
@@ -213,10 +220,15 @@ class EquityDataset(Dataset):
             test_data += samples[num_train_samples + num_val_samples:num_train_samples + num_val_samples + num_test_samples]
 
         # Create DataLoader objects
-        self.train_loader = DataLoader(train_data, batch_size=32, shuffle=True)
-        self.val_loader = DataLoader(val_data, batch_size=32, shuffle=False)
-        self.test_loader = DataLoader(test_data, batch_size=32, shuffle=False)
+        self.train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True)
+        self.val_loader = DataLoader(val_data, batch_size=batch_size, shuffle=False)
+        self.test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False)
         print(f"Train samples: {len(train_data)}, Val samples: {len(val_data)}, Test samples: {len(test_data)}")
+        # Save the data loaders for later use
+        if not os.path.exists("./cached_data_loaders"):
+            os.makedirs("./cached_data_loaders")
+        torch.save((self.train_loader, self.val_loader, self.test_loader), f"./cached_data_loaders/{industry}.pt")
+        print(f"Saved data loaders for {industry} to ./cached_data_loaders/{industry}.pt")
         return self.train_loader, self.val_loader, self.test_loader
 
     def split_df_into_samples(self, df, sample_window=None, sample_stride=1, normalize=True):
@@ -248,7 +260,7 @@ class EquityDataset(Dataset):
             input_sample = sample[:self.input_width, 1:]
             target_sample = sample[self.input_width:, 1:]
             # add the sample to the list
-            samples.append((input_sample, target_sample))
+            samples.append((input_sample, target_sample))  # Add channel dimension for target
         # return the samples as a list of tuples
         return samples
         
