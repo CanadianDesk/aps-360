@@ -33,23 +33,35 @@ def get_device():
     if torch.cuda.is_available():
         return "cuda"
     elif torch.backends.mps.is_available():
+        print("Using Apple Silicon GPU")
         return "mps"
     else:
         return "cpu"
     
-def get_model_accuracy(model, data_loader):
+
+def avishit_model_accuracy(model, data_loader, output_height=1):
+    return 0
+    
+def get_model_accuracy(model, data_loader, output_height=1):
     device = get_device()
     model.to(device)
+    model.eval()
 
+    # Run a simulations where we buy if the model predicts a price increase and sell if it predicts a price decrease
+    # and calculate the accuracy of the model as the % return of the simulation
+    total_return = 0.0
+    total_trades = 0
+    correct_trades = 0
     for inputs, targets in data_loader:
         inputs, targets = inputs.to(device), targets.to(device)
-        outputs = model(inputs)
-        # Assuming the model outputs are probabilities
-        predicted = torch.argmax(outputs, dim=1)
-        correct = (predicted == targets).sum().item()
-        accuracy = correct / len(targets)
 
-def train_model(model, train_loader, val_loader, num_epochs=10, lr=0.0001, save_interval=10):
+        with torch.no_grad():
+            outputs = model(inputs)
+
+        
+
+
+def train_model(model, train_loader, val_loader, num_epochs=10, lr=0.0001, save_interval=10, output_height=1):
     device = get_device()
     model.to(device)
     criterion = nn.MSELoss()
@@ -106,8 +118,8 @@ def train_model(model, train_loader, val_loader, num_epochs=10, lr=0.0001, save_
 def main():
     # note that the input height muse be 256 times the output height
 
-    convolutional_layers = [4, 16, 64, 256, 32, 16, 4, 2]
-    o_ht = 1
+    convolutional_layers = [8, 64, 256, 32, 4]
+    o_ht = 8
     i_ht = o_ht * (2**len(convolutional_layers))
     eqds = EquityDataset(input_height=i_ht, output_height=o_ht, include_industry_specific=True, normalize=False)
     train_loader, val_loader, test_loader = eqds.construct_data_loaders(industry="technology", sample_stride=4, batch_size=32)
@@ -123,7 +135,7 @@ def main():
     # print("Validation set size:", len(val_loader.dataset))
     # print("Test set size:", len(test_loader.dataset))
 
-    tl, vl, ta, va = train_model(model, train_loader, val_loader, num_epochs=30, lr=0.0001)
+    tl, vl, ta, va = train_model(model, train_loader, val_loader, num_epochs=30, lr=0.0001, output_height=o_ht)
     # Plot training and validation loss
     plt.figure(figsize=(10, 5))
     plt.plot(tl, label='Training Loss', color='blue')
