@@ -193,7 +193,6 @@ class EquityDataset(Dataset):
         
         train_data = []
         val_data = []
-        test_data = []
 
         designee_tickers = self.technology_tickers if industry == "technology" else self.energy_tickers if industry == "energy" else self.agriculture_tickers
 
@@ -211,24 +210,20 @@ class EquityDataset(Dataset):
             df = df.sort_values(by="Date")
             
             # Define split points (e.g., 80% train, 10% val, 10% test)
-            train_idx = int(len(df) * 0.8)
-            val_idx = int(len(df) * 0.9)
+            train_idx = int(len(df) * 0.9)
             
             # Split data chronologically
             train_df = df.iloc[:train_idx]
-            val_df = df.iloc[train_idx:val_idx]
-            test_df = df.iloc[val_idx:]
+            val_df = df.iloc[train_idx:]
             
             # Create samples for each split
             train_data.extend(self.split_df_into_samples(train_df, sample_stride=sample_stride))
             val_data.extend(self.split_df_into_samples(val_df, sample_stride=sample_stride))
-            test_data.extend(self.split_df_into_samples(test_df, sample_stride=sample_stride))
             
         # Create DataLoader objects
         self.train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True)
         self.val_loader = DataLoader(val_data, batch_size=batch_size, shuffle=False)
-        self.test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False)
-        print(f"Train samples: {len(train_data)}, Val samples: {len(val_data)}, Test samples: {len(test_data)}")
+        print(f"Train samples: {len(train_data)}, Val samples: {len(val_data)}")
         # Save the data loaders for later use
         if not os.path.exists("./cached_data_loaders"):
             os.makedirs("./cached_data_loaders")
@@ -262,13 +257,52 @@ class EquityDataset(Dataset):
             # convert the sample to a tensor
             sample = torch.tensor(sample.values, dtype=torch.float32)
             # make it an input, target pair
-            input_sample = sample[:self.input_height, 1:]
-            target_sample = sample[self.input_height:, 1:]
+            input_sample = sample[:self.input_height, :]
+            target_sample = sample[self.input_height:, :]
             # add the sample to the list
             samples.append((input_sample, target_sample))  # Add channel dimension for target
         # return the samples as a list of tuples
         return samples
         
+    def get_recent_input_tensror_for_ticker(self, ticker, industry="technology"):
+        if industry not in ["technology", "energy", "agriculture"]:
+            raise ValueError("Invalid industry specified. Choose from 'technology', 'energy', or 'agriculture'.")
+        designee_tickers = self.technology_tickers if industry == "technology" else self.energy_tickers if industry == "energy" else self.agriculture_tickers
+        if ticker not in designee_tickers:
+            raise ValueError(f"Ticker not found in dataset for {industry}")
+        
+        df = self.dataframes_dict[ticker]
+        # Get the most recent sample
+        recent_sample = df.iloc[-self.sample_window:]
+        # Drop the date column
+        recent_sample = recent_sample.drop(columns=["Date"])
+        # Normalize the sample based on the first input_height values
+        avg_max = 0
+        avg_min = 0
+        divisor = 0
+        for col in recent_sample.columns:
+            
+            min_val = recent_sample[col][:self.input_height].min()
+            max_val = recent_sample[col][:self.input_height].max()
+
+            if col in ["Open", "High", "Low", "Close"]:
+                avg_max += max_val
+                avg_min += min_val
+                divisor += 1
+                
+            if max_val - min_val != 0:
+                recent_sample[col] = (recent_sample[col] - min_val) / (max_val - min_val)
+            else:
+                recent_sample[col] = 0.5
+
+        avg_max /= divisor
+        avg_min /= divisor
+        # Convert the sample to a tensor
+        recent_sample = torch.tensor(recent_sample.values, dtype=torch.float32)
+        # split into input and target
+        input_sample = recent_sample[:self.input_height, 0:]
+        target_sample = recent_sample[self.input_height:, 0:]
+        return ((input_sample, target_sample), avg_max, avg_min)
     
     def plot_and_save_image(self, ticker, save_path="./dataset_plots"):
 
