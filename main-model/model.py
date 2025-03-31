@@ -9,8 +9,8 @@ class MCEWithDirectionPenalty(nn.Module):
     
     def forward(self, predictions, targets, inputs):
         # Compute the Absolute Mean Cubed Error (aMCE)
-        error = predictions - targets
-        mce_loss = torch.mean(torch.pow(error, 4))
+        error = torch.abs(predictions - targets)
+        mce_loss = torch.mean(torch.pow(error, 3))
         
         # Handle direction mismatch penalties
         batch_size = predictions.shape[0]
@@ -94,7 +94,7 @@ class EquityModel(nn.Module):
             x = conv(x)
 
             # x = F.relu(x) # Perhaps try other activations like LeakyReLU, or just linear
-            x = F.dropout(x, p=0.5) # if dropout is needed to prevent overfitting we can add it here
+            x = F.dropout(x, p=0.25) # if dropout is needed to prevent overfitting we can add it here
         
             # Pooling layer
             if self.pool_type == 'avg':

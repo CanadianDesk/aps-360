@@ -148,7 +148,7 @@ def train_model(model, train_loader, val_loader, num_epochs=10, lr=0.0001, outpu
     # criterion = nn.MSELoss()
     criterion = MCEWithDirectionPenalty(penalty_factor=_pf)
 
-    optimizer = optim.Adam(model.parameters(), lr=lr)
+    optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=0.0001)
 
     training_losses = []
     validation_losses = []
@@ -280,4 +280,4 @@ if __name__ == "__main__":
         "MSFT", "MU", "MUFG", "NOW", "NVDA", "ORCL", "PGR", "PLD", 
         "RY", "SCHW", "SMFG", "TD", "TSLA", "TXN", "UBS", "VRN.TO", "WFC"
     ]
-    main(False, tickers_to_test)
+    main(True, tickers_to_test)
