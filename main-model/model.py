@@ -2,6 +2,58 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+class MCEWithDirectionPenalty(nn.Module):
+    def __init__(self, penalty_factor=1.0):
+        super(MCEWithDirectionPenalty, self).__init__()
+        self.penalty_factor = penalty_factor  # Controls the penalty strength
+    
+    def forward(self, predictions, targets, inputs):
+        # Compute the Absolute Mean Cubed Error (aMCE)
+        error = predictions - targets
+        mce_loss = torch.mean(torch.pow(error, 4))
+        
+        # Handle direction mismatch penalties
+        batch_size = predictions.shape[0]
+        seq_len = predictions.shape[1]
+        
+        # Get the price column (assuming index 3 is the price)
+        price_idx = 3
+        
+        # For first day predictions
+        todays_price = inputs[:, -1, price_idx]  # Last input price
+        
+        # Initialize tensor to accumulate direction mismatches for all samples in batch
+        direction_mismatch = torch.zeros(batch_size, device=predictions.device)
+        
+        # Check direction for first day
+        tomorrow_prediction = predictions[:, 0, price_idx]
+        tomorrow_actual = targets[:, 0, price_idx]
+        
+        # Calculate direction mismatch for first day
+        pred_direction_up = tomorrow_prediction > todays_price
+        actual_direction_up = tomorrow_actual > todays_price
+        direction_mismatch += (pred_direction_up != actual_direction_up).float()
+        
+        # Check direction for remaining days
+        for day in range(1, seq_len):
+            prev_price = targets[:, day-1, price_idx]  # Use previous day's actual price
+            current_pred = predictions[:, day, price_idx]
+            current_actual = targets[:, day, price_idx]
+            
+            pred_direction_up = current_pred > prev_price
+            actual_direction_up = current_actual > prev_price
+            direction_mismatch += (pred_direction_up != actual_direction_up).float()
+        
+        # Normalize by sequence length to get average direction mismatch per sample
+        direction_mismatch = direction_mismatch / seq_len
+        # Take mean across batch
+        avg_direction_mismatch = torch.mean(direction_mismatch)
+        
+        # Add penalty to the loss (scaled by penalty_factor)
+        total_loss = mce_loss + self.penalty_factor * avg_direction_mismatch
+        
+        return total_loss
+
 class EquityModel(nn.Module):
     def __init__(self, width_k_bar=18, kernel_size=3, input_height=256, output_height=16, conv_out_channel_list=[4, 16, 64, 256], pool_type='avg'):
         super(EquityModel, self).__init__()
@@ -42,7 +94,7 @@ class EquityModel(nn.Module):
             x = conv(x)
 
             # x = F.relu(x) # Perhaps try other activations like LeakyReLU, or just linear
-            x = F.dropout(x, p=0.65) # if dropout is needed to prevent overfitting we can add it here
+            x = F.dropout(x, p=0.5) # if dropout is needed to prevent overfitting we can add it here
         
             # Pooling layer
             if self.pool_type == 'avg':
