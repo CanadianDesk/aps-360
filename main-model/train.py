@@ -207,7 +207,88 @@ device = get_device()
 #     print(f"Total return: {total_balance - 10000} for {total_balance/100:.2f}% return.")
     
 #     return total
+
+
+def run_simulations(model, ticker_list, output_height, week_sim_count, day_sim_count, month_sim_count):
+    print(f"Running {week_sim_count} week simulations, {day_sim_count} day simulations, and {month_sim_count} month simulations.")
+
+    total_week_returns = 0
+    total_day_returns = 0
+    total_month_returns = 0
+    average_week_returns = 0
+    average_day_returns = 0
+    average_month_returns = 0
+
+    num_day_gains = 0
+    num_month_gains = 0
+    num_week_gains = 0
     
+
+
+    for day in range(day_sim_count):
+        # pick a random number between 5 and len(ticker_list)
+        print(f"Running day simulation {day+1}/{day_sim_count}")
+        num_stocks = torch.randint(5, len(ticker_list), (1,)).item()
+        indices = torch.randperm(len(ticker_list))[:num_stocks]
+        tickers_to_sim = [ticker_list [i] for i in indices]
+
+        trial_return = complex_model_accuracy_v2(model, tickers_to_sim, num_days=1, output_height=output_height)
+        total_day_returns += trial_return        
+
+        if trial_return > 0:
+            num_day_gains += 1
+        
+    average_day_returns = total_day_returns / day_sim_count
+    print(f"Average daily return: {average_day_returns:.2f}")
+
+    for week in range(week_sim_count):
+        # pick a random number between 5 and len(ticker_list)
+        print(f"Running week simulation {week+1}/{week_sim_count}")
+        num_stocks = torch.randint(5, len(ticker_list), (1,)).item()
+        indices = torch.randperm(len(ticker_list))[:num_stocks]
+        tickers_to_sim = [ticker_list [i] for i in indices]
+
+        trial_return = complex_model_accuracy_v2(model, tickers_to_sim, num_days=7, output_height=output_height)
+        total_week_returns += trial_return
+
+        if trial_return > 0:
+            num_week_gains += 1
+
+    average_week_returns = total_week_returns / week_sim_count
+    print(f"Average weekly return: {average_week_returns:.2f}")
+
+    for month in range(month_sim_count):
+        # pick a random number between 5 and len(ticker_list)
+        print(f"Running month simulation {month+1}/{month_sim_count}")
+        num_stocks = torch.randint(5, len(ticker_list), (1,)).item()
+        indices = torch.randperm(len(ticker_list))[:num_stocks]
+        tickers_to_sim = [ticker_list [i] for i in indices]
+
+        trial_return = complex_model_accuracy_v2(model, tickers_to_sim, num_days=28, output_height=output_height)
+        total_month_returns += trial_return
+
+        if trial_return > 0:
+            num_month_gains += 1
+
+    average_month_returns = total_month_returns / month_sim_count
+    print(f"Average monthly return: {average_month_returns:.2f}")
+
+    def annualize(returns, period_in_days):
+        return (1 + returns) ** (365/period_in_days) - 1
+    
+    annualized_daily_returns = annualize(average_day_returns, period_in_days=1)
+    print(f"Annualized average daily return: {annualized_daily_returns * 100:.2f}%")
+    annualized_weekly_returns = annualize(average_week_returns, period_in_days=7)
+    print(f"Annualized averageweekly return: {annualized_weekly_returns * 100:.2f}%")
+    annualized_monthly_returns = annualize(average_month_returns, period_in_days=28)
+    print(f"Annualized average monthly return: {annualized_monthly_returns * 100:.2f}%")
+
+    print(f"Percent positive gains in daily sims: {num_day_gains/day_sim_count * 100:.2f}%")
+    print(f"Percent positive gains in weekly sims: {num_week_gains/week_sim_count * 100:.2f}%")
+    print(f"Percent positive gains in monthly sims: {num_month_gains/month_sim_count * 100:.2f}%")
+
+    return annualized_daily_returns, annualized_weekly_returns, annualized_monthly_returns
+
 def complex_model_accuracy_v2(model, ticker_list, num_days=7, output_height=1):
     MAX_NUM_DAYS = 29
     PORTFOLIO_STARTING_VALUE = 10000
@@ -229,7 +310,7 @@ def complex_model_accuracy_v2(model, ticker_list, num_days=7, output_height=1):
         ticker_to_data[ticker] = list(ticker_to_data[ticker])
 
     for day in range(num_days): # loop over num_days
-        print(f"Simulating day {day+1}/{num_days}")
+        # print(f"Simulating day {day+1}/{num_days}")
 
         for ticker in ticker_list:
             
@@ -241,6 +322,7 @@ def complex_model_accuracy_v2(model, ticker_list, num_days=7, output_height=1):
             with torch.no_grad():
                 outputs = model(ticker_to_data[ticker][0].unsqueeze(0).to(device))
 
+            # show_tensor_image(ticker_to_data[ticker][0], title=f"{ticker}")
             # show_tensor_image(ticker_to_data[ticker][0], title=f"{ticker}")
 
             # populate future_prices with the prices for the next min(num_days, output_height) days
@@ -273,7 +355,6 @@ def complex_model_accuracy_v2(model, ticker_list, num_days=7, output_height=1):
             else:
                 # sell
                 sold_stocks.add(ticker)
-                # TODO: add to cash_in_hand (this requires inversing the normalization of the data)
                 cash_in_hand += portfolio[ticker_list.index(ticker)]
                 portfolio[ticker_list.index(ticker)] = 0
 
@@ -298,7 +379,7 @@ def complex_model_accuracy_v2(model, ticker_list, num_days=7, output_height=1):
     print(f"Starting balance: ${PORTFOLIO_STARTING_VALUE:.2f}\nResulting balance: ${total_balance:.2f}\n")
     print(f"Total in stocks: ${sum(portfolio):.2f}. Total in cash: ${cash_in_hand:.2f}")
     print(f"Total return: ${(total_balance - PORTFOLIO_STARTING_VALUE):.2f} for {((total_balance - PORTFOLIO_STARTING_VALUE) / PORTFOLIO_STARTING_VALUE) * 100:.2f}% return.")
-    return total_balance
+    return (total_balance - PORTFOLIO_STARTING_VALUE) / PORTFOLIO_STARTING_VALUE
 
 
 
@@ -401,7 +482,7 @@ def train_model(model, train_loader, val_loader, num_epochs=10, lr=0.0001, outpu
     return training_losses, validation_losses, validation_accuracies, training_accuracies
         
 
-def main(train=True, tickers=None):
+def main(train=True, tickers=None, sim_tickers=None):
     # note that the input height muse be 256 times the output height
     torch.manual_seed(0)
     np.random.seed(0)
@@ -456,7 +537,8 @@ def main(train=True, tickers=None):
     model.load_state_dict(best_model)
 
     # test_accuracy = complex_model_accuracy(model, test_loader, num_days=7, output_height=o_ht)
-    test_accuracy = complex_model_accuracy_v2(model, tickers, num_days=1, output_height=o_ht)
+    # test_accuracy = complex_model_accuracy_v2(model, tickers, num_days=7, output_height=o_ht)
+    run_simulations(model, sim_tickers, output_height=o_ht, week_sim_count=20, day_sim_count=20, month_sim_count=20)
 
     for ticker in tickers:
         print(f"Testing {ticker}...")
@@ -471,11 +553,18 @@ def main(train=True, tickers=None):
     
 
 if __name__ == "__main__":
-    tickers_to_test = [
+    charles_portfolio = [
         "AAPL", "ADBE", "ADI", "AMD", "AMZN",
         "BX","GOOG",
         "HSBC", "KKR", "META", 
         "MSFT", "NVDA", "ORCL",
         "TD", "TXN"
     ]
-    main(False, tickers_to_test)
+    tickers_to_test = [
+        "AAPL", "ADBE", "ADI", "AMAT", "AMD", "AMZN", "AVGO", "AXP", 
+        "BAC", "BLK", "BX", "C", "CB", "CRM", "CSCO", "GOOG", "GS", 
+        "HDB", "HSBC", "INTU", "JPM", "KKR", "META", "MMC", "MS", 
+        "MSFT", "MU", "MUFG", "NOW", "NVDA", "ORCL", "PGR", "PLD", 
+        "RY", "SCHW", "SMFG", "TD", "TSLA", "TXN", "UBS", "WFC"
+    ]    
+    main(False, tickers=charles_portfolio, sim_tickers=tickers_to_test)
