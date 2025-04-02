@@ -94,7 +94,7 @@ class EquityModel(nn.Module):
             x = conv(x)
 
             # x = F.relu(x) # Perhaps try other activations like LeakyReLU, or just linear
-            x = F.dropout(x, p=0.25) # if dropout is needed to prevent overfitting we can add it here
+            x = F.dropout(x, p=0.1) # if dropout is needed to prevent overfitting we can add it here
         
             # Pooling layer
             if self.pool_type == 'avg':

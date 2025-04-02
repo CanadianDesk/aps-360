@@ -18,6 +18,14 @@ from torchvision.utils import make_grid
 
 eqds = None
 
+def renormalize_tensor(tensor):
+    """
+    Renormalize a tensor to the range [0, 1].
+    """
+    min_val = tensor.min()
+    max_val = tensor.max()
+    return (tensor - min_val) / (max_val - min_val)
+
 def show_prediction(model, o_ht=1, ticker="AAPL"):
     # Do another quick test on the last sample window days of a stock
     data, _max, _min = eqds.get_recent_input_tensror_for_ticker(ticker)
@@ -233,7 +241,7 @@ def complex_model_accuracy_v2(model, ticker_list, num_days=7, output_height=1):
             with torch.no_grad():
                 outputs = model(ticker_to_data[ticker][0].unsqueeze(0).to(device))
 
-            show_tensor_image(ticker_to_data[ticker][0], title=f"{ticker}")
+            # show_tensor_image(ticker_to_data[ticker][0], title=f"{ticker}")
 
             # populate future_prices with the prices for the next min(num_days, output_height) days
             # from the inference
@@ -334,7 +342,7 @@ def train_model(model, train_loader, val_loader, num_epochs=10, lr=0.0001, outpu
     # criterion = nn.MSELoss()
     criterion = MCEWithDirectionPenalty(penalty_factor=_pf)
 
-    optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=0.0001)
+    optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=0.00001)
 
     training_losses = []
     validation_losses = []
@@ -395,13 +403,13 @@ def train_model(model, train_loader, val_loader, num_epochs=10, lr=0.0001, outpu
 
 def main(train=True, tickers=None):
     # note that the input height muse be 256 times the output height
-    torch.manual_seed(42)
-    np.random.seed(42)
+    torch.manual_seed(0)
+    np.random.seed(0)
     global eqds
     # convolutional_layers = [4, 16, 64, 256, 32, 16, 8, 4] # this works well
 
     # if the below are changed the cached data loaders must be cleared manually rn
-    convolutional_layers = [4, 8, 32, 128, 256, 64, 16, 4]
+    convolutional_layers = [4, 16, 32, 128, 256, 64, 32, 4]
     # convolutional_layers = [16, 64, 128, 64, 16]
     o_ht = 1
     i_ht = o_ht * (2**len(convolutional_layers))
@@ -422,7 +430,7 @@ def main(train=True, tickers=None):
     # print("Test set size:", len(test_loader.dataset))
 
     if train:
-        tl, vl, va, ta = train_model(model, train_loader, val_loader, num_epochs=10, lr=0.0001, output_height=o_ht, _pf=0.0755)
+        tl, vl, va, ta = train_model(model, train_loader, val_loader, num_epochs=10, lr=0.0001, output_height=o_ht, _pf=0.05)
         # Plot training and validation loss
         plt.figure(figsize=(10, 5))
         plt.plot(tl, label='Training Loss', color='blue')
@@ -444,11 +452,11 @@ def main(train=True, tickers=None):
         plt.grid()
         plt.show()
 
-    best_model = torch.load("./cached_models/best_loss_equitymodel.pth")
+    best_model = torch.load("./cached_models/best_accuracy_equitymodel.pth")
     model.load_state_dict(best_model)
 
     # test_accuracy = complex_model_accuracy(model, test_loader, num_days=7, output_height=o_ht)
-    test_accuracy = complex_model_accuracy_v2(model, tickers, num_days=7, output_height=o_ht)
+    test_accuracy = complex_model_accuracy_v2(model, tickers, num_days=1, output_height=o_ht)
 
     for ticker in tickers:
         print(f"Testing {ticker}...")
@@ -467,7 +475,7 @@ if __name__ == "__main__":
         "AAPL", "ADBE", "ADI", "AMD", "AMZN",
         "BX","GOOG",
         "HSBC", "KKR", "META", 
-        "MSFT",  "NVDA", "ORCL",
+        "MSFT", "NVDA", "ORCL",
         "TD", "TXN"
     ]
     main(False, tickers_to_test)
