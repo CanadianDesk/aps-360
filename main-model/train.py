@@ -10,6 +10,7 @@ import numpy as np
 import os
 import pandas as pd
 from datetime import datetime
+import copy
 
 import matplotlib.pyplot as plt
 import torchvision.transforms as transforms
@@ -105,9 +106,194 @@ def get_device():
 device = get_device()
 
 
-def avishit_model_accuracy(model, data_loader, output_height=1):
-    return 0
+# def complex_model_accuracy(model, data_loader, num_days=7, output_height=1):
+#     # Simulates the performance of the model if it were to be used to
+#     # trade a portfolio of the stocks in data_loader over the next num_days
+
+#     MAX_NUM_DAYS = 30
+
+#     if num_days > MAX_NUM_DAYS:
+#         print(f"num_days cannot be greater than {MAX_NUM_DAYS}. Setting num_days to {MAX_NUM_DAYS}")
+#         num_days = MAX_NUM_DAYS
+
+#     model.to(device)
+#     num_stocks = len(data_loader.dataset) * 32
+#     print(f"DEBUG: num_stocks: {num_stocks}")
+
+#     copy_data_loader = copy.deepcopy(data_loader)
+#     portfolio = [1 / num_stocks] * num_stocks
+#     print(f"DEBUG: This should be 1: {sum(portfolio)}")
+#     sold_stocks = [0] * num_stocks
+
+#     # cash_in_hand = 0
+
+#     for day in range(num_days): # loop over num_days
+#         print(f"Simulating day {day+1}/{num_days}")
+        
+#         # Create a list to store updated batch data
+#         updated_data = []
+        
+#         for inputs, targets in copy_data_loader: # looping through batches
+#             inputs, targets = inputs.to(device), targets.to(device)
+#             with torch.no_grad():
+#                 outputs = model(inputs)
+
+
+#             for (i, output) in enumerate(outputs): # looping through individual stocks
+#                 # Skip stocks that have already been sold
+#                 if sold_stocks[i] == 1:
+#                     continue
+
+#                 # See if the max price over the next min(num_days, output_height) days is greater than the current price
+#                 todays_price = inputs[i][-1, 3].squeeze(0)  # Assuming index 3 is the Close price
+#                 future_prices = []
+
+#                 for future_day in range(min(num_days-day, output_height)):
+#                     future_prices.append(output[future_day, 3].squeeze(0))
+
+#                 # Check if max price is greater than today's price
+#                 if max(future_prices) > todays_price:
+#                     # Hold
+#                     # Change value in portfolio to scale by the price increase of one day
+#                     portfolio[i] *= (future_prices[0] / todays_price)
+#                     print(f"DEBUG: todays_price: {todays_price}")
+#                 else:
+#                     # Sell
+#                     # Freezes the value of the stock in the portfolio
+#                     sold_stocks[i] = 1
+#                     # TODO: add to cash_in_hand (this requires inversing the normalization of the data)
+
+#             # After processing this batch, store the updated inputs/targets for the next day
+#             for j in range(inputs.size(0)):
+#                 # Create new input by dropping oldest timepoint and adding first target timepoint
+#                 new_input = inputs[j, 1:, :].clone()  # Remove first day
+#                 first_target = targets[j, 0, :].unsqueeze(0)  # Get first target day
+#                 new_input = torch.cat([new_input, first_target], dim=0)  # Combine
+                
+#                 # Create new target by dropping the used day
+#                 # Since targets is always 30 days, we can safely remove the first day
+#                 new_target = targets[j, 1:, :].clone()
+                
+#                 updated_data.append((new_input, new_target))
+        
+#         #debug print
+#         print(f"DEBUG: Portfolio Sum: {sum(portfolio)}") 
+#         # print(f"DEBUG: Portfolio: {portfolio}")
+
+#         # Replace dataloader with updated data if this is not the last day
+#         if day < num_days - 1:
+#             # Create a new dataset from updated data
+#             copy_data_loader = DataLoader(
+#                 updated_data,
+#                 batch_size=copy_data_loader.batch_size,
+#                 shuffle=False  # Important: maintain original order
+#             )
+
+#     # Find the total return of the portfolio
+#     total = sum(portfolio)
+
+#     # Simulate for a 10k portfolio
+#     total_balance = 10000 + 10000 * total
+#     print(f"Simulated portfolio for {num_days} days:")
+#     print(f"Starting balance: 10k\nResulting balance: {total_balance}\n")
+#     print(f"Total return: {total_balance - 10000} for {total_balance/100:.2f}% return.")
     
+#     return total
+    
+def complex_model_accuracy_v2(model, ticker_list, num_days=7, output_height=1):
+    MAX_NUM_DAYS = 29
+    PORTFOLIO_STARTING_VALUE = 10000
+    if num_days > MAX_NUM_DAYS:
+        print(f"num_days cannot be greater than {MAX_NUM_DAYS}. Setting num_days to {MAX_NUM_DAYS}")
+        num_days = MAX_NUM_DAYS
+    
+    model.to(device)
+    num_stocks = len(ticker_list)
+    portfolio = [1 / num_stocks * PORTFOLIO_STARTING_VALUE] * num_stocks
+    sold_stocks = set()
+    cash_in_hand = 0
+
+    ticker_to_data = {}
+    max_vals = {}
+    min_vals = {}
+    for ticker in ticker_list:
+        ticker_to_data[ticker], max_vals[ticker], min_vals[ticker] = eqds.get_recent_input_tensror_for_ticker(ticker, target_window=MAX_NUM_DAYS)
+        ticker_to_data[ticker] = list(ticker_to_data[ticker])
+
+    for day in range(num_days): # loop over num_days
+        print(f"Simulating day {day+1}/{num_days}")
+
+        for ticker in ticker_list:
+            
+            todays_price = ticker_to_data[ticker][0][-1, 3]
+            tomorrows_price = ticker_to_data[ticker][1][0, 3]
+            future_prices_inferred = []
+
+            # run the inference
+            with torch.no_grad():
+                outputs = model(ticker_to_data[ticker][0].unsqueeze(0).to(device))
+
+            show_tensor_image(ticker_to_data[ticker][0], title=f"{ticker}")
+
+            # populate future_prices with the prices for the next min(num_days, output_height) days
+            # from the inference
+            for future_day in range(min(num_days-day, output_height)):
+                future_prices_inferred.append(outputs[0, future_day, 3].squeeze(0))
+
+            # check if max price is greater than today's price
+            todays_price_denormalized = todays_price * (max_vals[ticker] - min_vals[ticker]) + min_vals[ticker]
+            tomorrows_price_denormalized = tomorrows_price * (max_vals[ticker] - min_vals[ticker]) + min_vals[ticker]
+
+            if max(future_prices_inferred) > todays_price:
+
+                if ticker not in sold_stocks:
+                    # hold
+                    # get the price increase percentage of one day
+                    change_ratio = tomorrows_price_denormalized / todays_price_denormalized
+                    #increase portfolio value
+                    portfolio[ticker_list.index(ticker)] *= change_ratio
+
+                #see if buying is good
+                #check if there is cash in hand
+                if cash_in_hand > 0:
+                    #divide the cash in hand by the number of stocks sold
+                    cash_to_spend = cash_in_hand / len(sold_stocks)
+                    portfolio[ticker_list.index(ticker)] += cash_to_spend
+                    cash_in_hand -= cash_to_spend
+                    if ticker in sold_stocks:
+                        sold_stocks.remove(ticker)
+            else:
+                # sell
+                sold_stocks.add(ticker)
+                # TODO: add to cash_in_hand (this requires inversing the normalization of the data)
+                cash_in_hand += portfolio[ticker_list.index(ticker)]
+                portfolio[ticker_list.index(ticker)] = 0
+
+
+        # after processing, need to update the ticker_to_data dictionary to
+        # shift data by one day
+        for ticker in ticker_list:
+
+            # print(f"INITIAL DATA: {ticker_to_data[ticker][0]}")
+            # drop the first day in the input
+            ticker_to_data[ticker][0] = ticker_to_data[ticker][0][1:, :]
+
+            # print(f"FIRST DAY DROPPED DATA: {ticker_to_data[ticker][0]}")
+            # add the first day in the target to the end of the input
+            ticker_to_data[ticker][0] = torch.cat((ticker_to_data[ticker][0], ticker_to_data[ticker][1][0].unsqueeze(0)), dim=0)
+            # drop the first day in the target
+            ticker_to_data[ticker][1] = ticker_to_data[ticker][1][1:].squeeze(0)
+            # print(f"UPDATED DATA: {ticker_to_data[ticker][0]}")
+    
+    total_balance = sum(portfolio) + cash_in_hand
+    print(f"Simulated portfolio for {num_days} days:")
+    print(f"Starting balance: ${PORTFOLIO_STARTING_VALUE:.2f}\nResulting balance: ${total_balance:.2f}\n")
+    print(f"Total in stocks: ${sum(portfolio):.2f}. Total in cash: ${cash_in_hand:.2f}")
+    print(f"Total return: ${(total_balance - PORTFOLIO_STARTING_VALUE):.2f} for {((total_balance - PORTFOLIO_STARTING_VALUE) / PORTFOLIO_STARTING_VALUE) * 100:.2f}% return.")
+    return total_balance
+
+
+
 def get_model_accuracy(model, data_loader, output_height=1):
     model.to(device)
     total_return = 0.0
@@ -143,7 +329,7 @@ def get_model_accuracy(model, data_loader, output_height=1):
                 
     return (correct_trades / total_trades)
 
-def train_model(model, train_loader, val_loader, num_epochs=10, lr=0.0001, output_height=1, _pf=0.1):
+def train_model(model, train_loader, val_loader, num_epochs=10, lr=0.0001, output_height=1, _pf=0.3):
     model.to(device)
     # criterion = nn.MSELoss()
     criterion = MCEWithDirectionPenalty(penalty_factor=_pf)
@@ -216,6 +402,7 @@ def main(train=True, tickers=None):
 
     # if the below are changed the cached data loaders must be cleared manually rn
     convolutional_layers = [4, 8, 32, 128, 256, 64, 16, 4]
+    # convolutional_layers = [16, 64, 128, 64, 16]
     o_ht = 1
     i_ht = o_ht * (2**len(convolutional_layers))
     # below this should be ok
@@ -235,7 +422,7 @@ def main(train=True, tickers=None):
     # print("Test set size:", len(test_loader.dataset))
 
     if train:
-        tl, vl, va, ta = train_model(model, train_loader, val_loader, num_epochs=10, lr=0.0001, output_height=o_ht, _pf=0.075)
+        tl, vl, va, ta = train_model(model, train_loader, val_loader, num_epochs=10, lr=0.0001, output_height=o_ht, _pf=0.0755)
         # Plot training and validation loss
         plt.figure(figsize=(10, 5))
         plt.plot(tl, label='Training Loss', color='blue')
@@ -260,6 +447,9 @@ def main(train=True, tickers=None):
     best_model = torch.load("./cached_models/best_loss_equitymodel.pth")
     model.load_state_dict(best_model)
 
+    # test_accuracy = complex_model_accuracy(model, test_loader, num_days=7, output_height=o_ht)
+    test_accuracy = complex_model_accuracy_v2(model, tickers, num_days=7, output_height=o_ht)
+
     for ticker in tickers:
         print(f"Testing {ticker}...")
         show_prediction(model, o_ht, ticker)
@@ -274,10 +464,10 @@ def main(train=True, tickers=None):
 
 if __name__ == "__main__":
     tickers_to_test = [
-        "AAPL", "ADBE", "ADI", "AMAT", "AMD", "AMZN", "AVGO", "AXP", 
-        "BAC", "BLK", "BX", "C", "CB", "CRM", "CSCO", "GOOG", "GS", 
-        "HDB", "HSBC", "INTU", "JPM", "KKR", "META", "MMC", "MS", 
-        "MSFT", "MU", "MUFG", "NOW", "NVDA", "ORCL", "PGR", "PLD", 
-        "RY", "SCHW", "SMFG", "TD", "TSLA", "TXN", "UBS", "VRN.TO", "WFC"
+        "AAPL", "ADBE", "ADI", "AMD", "AMZN",
+        "BX","GOOG",
+        "HSBC", "KKR", "META", 
+        "MSFT",  "NVDA", "ORCL",
+        "TD", "TXN"
     ]
-    main(True, tickers_to_test)
+    main(False, tickers_to_test)

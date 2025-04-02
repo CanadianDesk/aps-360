@@ -193,6 +193,7 @@ class EquityDataset(Dataset):
         
         train_data = []
         val_data = []
+        test_data = []
 
         designee_tickers = self.technology_tickers if industry == "technology" else self.energy_tickers if industry == "energy" else self.agriculture_tickers
 
@@ -210,19 +211,22 @@ class EquityDataset(Dataset):
             df = df.sort_values(by="Date")
             
             # Define split points (e.g., 80% train, 10% val, 10% test)
-            train_idx = int(len(df) * 0.9)
+            train_idx = int(len(df) * 0.8)
             
             # Split data chronologically
             train_df = df.iloc[:train_idx]
             val_df = df.iloc[train_idx:]
+            test_df = val_df
             
             # Create samples for each split
             train_data.extend(self.split_df_into_samples(train_df, sample_stride=sample_stride))
             val_data.extend(self.split_df_into_samples(val_df, sample_stride=sample_stride))
+            test_data.extend(self.split_df_into_samples(test_df, sample_stride=sample_stride, sample_window = self.input_height + 30))
             
         # Create DataLoader objects
         self.train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True)
         self.val_loader = DataLoader(val_data, batch_size=batch_size, shuffle=False)
+        self.test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False)
         print(f"Train samples: {len(train_data)}, Val samples: {len(val_data)}")
         # Save the data loaders for later use
         if not os.path.exists("./cached_data_loaders"):
@@ -264,7 +268,7 @@ class EquityDataset(Dataset):
         # return the samples as a list of tuples
         return samples
         
-    def get_recent_input_tensror_for_ticker(self, ticker, industry="technology"):
+    def get_recent_input_tensror_for_ticker(self, ticker, industry="technology", target_window=1):
         if industry not in ["technology", "energy", "agriculture"]:
             raise ValueError("Invalid industry specified. Choose from 'technology', 'energy', or 'agriculture'.")
         designee_tickers = self.technology_tickers if industry == "technology" else self.energy_tickers if industry == "energy" else self.agriculture_tickers
@@ -273,7 +277,7 @@ class EquityDataset(Dataset):
         
         df = self.dataframes_dict[ticker]
         # Get the most recent sample
-        recent_sample = df.iloc[-self.sample_window:]
+        recent_sample = df.iloc[-(self.input_height + target_window):] 
         # Drop the date column
         recent_sample = recent_sample.drop(columns=["Date"])
         # Normalize the sample based on the first input_height values
