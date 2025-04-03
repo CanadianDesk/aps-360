@@ -312,7 +312,7 @@ def complex_model_accuracy(model, ticker_list, num_days=7, output_height=1, indu
     max_vals = {}
     min_vals = {}
     for ticker in ticker_list:
-        ticker_to_data[ticker], max_vals[ticker], min_vals[ticker] = eqds.get_random_validation_day_input_tensor_for_ticker(ticker, target_window=MAX_NUM_DAYS, industry=industry)
+        ticker_to_data[ticker], max_vals[ticker], min_vals[ticker] = eqds.get_validation_input_tensor_for_ticker(ticker, target_window=MAX_NUM_DAYS, industry=industry)
         #showimage
         # show_tensor_image(ticker_to_data[ticker][0], title=ticker)
         ticker_to_data[ticker] = list(ticker_to_data[ticker])
