@@ -234,6 +234,83 @@ class EquityDataset(Dataset):
         torch.save((self.train_loader, self.val_loader, self.test_loader), f"./cached_data_loaders/{industry}.pt")
         print(f"Saved data loaders for {industry} to ./cached_data_loaders/{industry}.pt")
         return self.train_loader, self.val_loader, self.test_loader
+    
+    def alternate_construct_data_loaders(self, industry="technology", sample_stride=8, batch_size=32):
+        # splits training/val by ticker and not temporally
+        if industry not in ["technology", "energy", "agriculture"]:
+            raise ValueError("Invalid industry specified. Choose from 'technology', 'energy', or 'agriculture'.")
+        
+        cache_path = f"./cached_data_loaders/{industry}_alternate.pt"
+        if os.path.exists(cache_path):
+            print(f"Loading cached alternate data loaders for {industry}...")
+            data_loaders = torch.load(cache_path, weights_only=False)
+            self.train_loader, self.val_loader, self.test_loader = data_loaders
+            return self.train_loader, self.val_loader, self.test_loader
+        
+        train_data = []
+        val_data = []
+        test_data = []
+
+        # Get tickers for the specified industry
+        if industry == "technology":
+            designee_tickers = self.technology_tickers
+        elif industry == "energy":
+            designee_tickers = self.energy_tickers
+        else:  # agriculture
+            designee_tickers = self.agriculture_tickers
+        
+        # Filter to tickers available in our dataset
+        available_tickers = [t for t in designee_tickers if t in self.dataframes_dict]
+        
+        # Randomly shuffle tickers to ensure random split
+        np.random.seed(42)  # For reproducibility
+        np.random.shuffle(available_tickers)
+        
+        # Split tickers: 80% train, 20% val/test
+        split_idx = int(len(available_tickers) * 0.8)
+        train_tickers = available_tickers[:split_idx]
+        val_test_tickers = available_tickers[split_idx:]
+        
+        print(f"Training tickers ({len(train_tickers)}): {', '.join(train_tickers)}")
+        print(f"Validation/Test tickers ({len(val_test_tickers)}): {', '.join(val_test_tickers)}")
+        
+        # Process training tickers (using all time periods)
+        for ticker in train_tickers:
+            print(f"Processing training ticker: {ticker}")
+            df = self.dataframes_dict[ticker]
+            df = df.sort_values(by="Date")
+            train_data.extend(self.split_df_into_samples(df, sample_stride=sample_stride))
+        
+        # Process validation/test tickers (also using all time periods, but split within each ticker)
+        for ticker in val_test_tickers:
+            print(f"Processing validation/test ticker: {ticker}")
+            df = self.dataframes_dict[ticker]
+            df = df.sort_values(by="Date")
+            
+            # Split each validation ticker's data into val and test
+            # Here we do a time-based split within each validation ticker
+            split_idx = int(len(df) * 0.5)  # 50/50 split between val and test
+            val_df = df.iloc[:split_idx]
+            test_df = df.iloc[split_idx:]
+            
+            val_data.extend(self.split_df_into_samples(val_df, sample_stride=sample_stride))
+            test_data.extend(self.split_df_into_samples(test_df, sample_stride=sample_stride, 
+                                                    sample_window=self.input_height + 30))
+        
+        # Create DataLoader objects
+        self.train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True)
+        self.val_loader = DataLoader(val_data, batch_size=batch_size, shuffle=False)
+        self.test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False)
+        
+        print(f"Train samples: {len(train_data)}, Val samples: {len(val_data)}, Test samples: {len(test_data)}")
+        
+        # Save the data loaders for later use
+        if not os.path.exists("./cached_data_loaders"):
+            os.makedirs("./cached_data_loaders")
+        torch.save((self.train_loader, self.val_loader, self.test_loader), cache_path)
+        print(f"Saved alternate data loaders for {industry} to {cache_path}")
+        
+        return self.train_loader, self.val_loader, self.test_loader    
 
     def split_df_into_samples(self, df, sample_window=None, sample_stride=1, normalize=True):
         if sample_window is None:
@@ -267,8 +344,130 @@ class EquityDataset(Dataset):
             samples.append((input_sample, target_sample))  # Add channel dimension for target
         # return the samples as a list of tuples
         return samples
+
+    def get_random_validation_day_input_tensor_for_ticker(self, ticker, industry="technology", target_window=1):
+        if industry not in ["technology", "energy", "agriculture"]:
+            raise ValueError("Invalid industry specified. Choose from 'technology', 'energy', or 'agriculture'.")
         
-    def get_recent_input_tensror_for_ticker(self, ticker, industry="technology", target_window=1):
+        designee_tickers = self.technology_tickers if industry == "technology" else self.energy_tickers if industry == "energy" else self.agriculture_tickers
+        if ticker not in designee_tickers:
+            raise ValueError(f"Ticker {ticker} not found in dataset for {industry}")
+        
+        df = self.dataframes_dict[ticker]
+        
+        # Calculate the validation set start index (last 20% of data)
+        val_start_idx = int(len(df) * 0.8)
+        
+        # Calculate the maximum valid starting index within validation set
+        # to ensure we have enough data for both input and target windows
+        max_start_idx = len(df) - (self.input_height + target_window)
+        
+        # Make sure we don't start before the validation set
+        valid_start_idx = max(val_start_idx, 0)
+        
+        if max_start_idx <= valid_start_idx:
+            raise ValueError(f"Not enough validation data for ticker {ticker} to create sample with requested window sizes")
+        
+        # Select a random starting point within the validation set
+        start_idx = torch.randint(valid_start_idx, max_start_idx + 1, (1,)).item()
+        
+        # Get the sample starting from the random point
+        random_sample = df.iloc[start_idx:start_idx + self.input_height + target_window]
+        
+        # Drop the date column
+        random_sample = random_sample.drop(columns=["Date"])
+        
+        # Normalize the sample based on the input_height values
+        avg_max = 0
+        avg_min = 0
+        divisor = 0
+        
+        for col in random_sample.columns:
+            min_val = random_sample[col][:self.input_height].min()
+            max_val = random_sample[col][:self.input_height].max()
+            
+            if col in ["Open", "High", "Low", "Close"]:
+                avg_max += max_val
+                avg_min += min_val
+                divisor += 1
+                
+            if max_val - min_val != 0:
+                random_sample[col] = (random_sample[col] - min_val) / (max_val - min_val)
+            else:
+                random_sample[col] = 0.5
+        
+        if divisor > 0:
+            avg_max /= divisor
+            avg_min /= divisor
+        
+        # Convert the sample to a tensor
+        random_sample = torch.tensor(random_sample.values, dtype=torch.float32)
+        
+        # Split into input and target
+        input_sample = random_sample[:self.input_height, :]
+        target_sample = random_sample[self.input_height:, :]  # This will include target_window days
+        
+        return ((input_sample, target_sample), avg_max, avg_min)        
+    
+    def get_random_day_input_tensor_for_ticker(self, ticker, industry="technology", target_window=1):
+        if industry not in ["technology", "energy", "agriculture"]:
+            raise ValueError("Invalid industry specified. Choose from 'technology', 'energy', or 'agriculture'.")
+        
+        designee_tickers = self.technology_tickers if industry == "technology" else self.energy_tickers if industry == "energy" else self.agriculture_tickers
+        if ticker not in designee_tickers:
+            raise ValueError(f"Ticker not found in dataset for {industry}")
+        
+        df = self.dataframes_dict[ticker]
+        
+        # Calculate the maximum valid starting index to ensure we have enough data
+        # for both input and target windows
+        max_start_idx = len(df) - (self.input_height + target_window)
+        
+        if max_start_idx <= 0:
+            raise ValueError(f"Not enough data for ticker {ticker} to create sample with requested window sizes")
+        
+        # Select a random starting point
+        start_idx = torch.randint(0, max_start_idx, (1,)).item()
+        
+        # Get the sample starting from the random point
+        random_sample = df.iloc[start_idx:start_idx + self.input_height + target_window]
+        
+        # Drop the date column
+        random_sample = random_sample.drop(columns=["Date"])
+        
+        # Normalize the sample based on the input_height values
+        avg_max = 0
+        avg_min = 0
+        divisor = 0
+        
+        for col in random_sample.columns:
+            min_val = random_sample[col][:self.input_height].min()
+            max_val = random_sample[col][:self.input_height].max()
+            
+            if col in ["Open", "High", "Low", "Close"]:
+                avg_max += max_val
+                avg_min += min_val
+                divisor += 1
+                
+            if max_val - min_val != 0:
+                random_sample[col] = (random_sample[col] - min_val) / (max_val - min_val)
+            else:
+                random_sample[col] = 0.5
+        
+        if divisor > 0:
+            avg_max /= divisor
+            avg_min /= divisor
+        
+        # Convert the sample to a tensor
+        random_sample = torch.tensor(random_sample.values, dtype=torch.float32)
+        
+        # Split into input and target
+        input_sample = random_sample[:self.input_height, :]
+        target_sample = random_sample[self.input_height:, :]  # This will include target_window days
+        
+        return ((input_sample, target_sample), avg_max, avg_min)    
+        
+    def get_validation_input_tensor_for_ticker(self, ticker, industry="technology", target_window=1):
         if industry not in ["technology", "energy", "agriculture"]:
             raise ValueError("Invalid industry specified. Choose from 'technology', 'energy', or 'agriculture'.")
         designee_tickers = self.technology_tickers if industry == "technology" else self.energy_tickers if industry == "energy" else self.agriculture_tickers
@@ -308,6 +507,47 @@ class EquityDataset(Dataset):
         target_sample = recent_sample[self.input_height:, 0:]
         return ((input_sample, target_sample), avg_max, avg_min)
     
+    def get_training_input_tensor_for_ticker(self, ticker, industry="technology", target_window=1):
+        if industry not in ["technology", "energy", "agriculture"]:
+            raise ValueError("Invalid industry specified. Choose from 'technology', 'energy', or 'agriculture'.")
+        designee_tickers = self.technology_tickers if industry == "technology" else self.energy_tickers if industry == "energy" else self.agriculture_tickers
+        if ticker not in designee_tickers:
+            raise ValueError(f"Ticker not found in dataset for {industry}")
+        
+        df = self.dataframes_dict[ticker]
+        # Get the most recent sample
+        n = torch.randint(0, len(df) - (self.input_height + target_window), (1,)).item()
+        recent_sample = df.iloc[:((self.input_height + target_window)*n)]  
+        # Drop the date column
+        recent_sample = recent_sample.drop(columns=["Date"])
+        # Normalize the sample based on the first input_height values
+        avg_max = 0
+        avg_min = 0
+        divisor = 0
+        for col in recent_sample.columns:
+            
+            min_val = recent_sample[col][:self.input_height].min()
+            max_val = recent_sample[col][:self.input_height].max()
+
+            if col in ["Open", "High", "Low", "Close"]:
+                avg_max += max_val
+                avg_min += min_val
+                divisor += 1
+                
+            if max_val - min_val != 0:
+                recent_sample[col] = (recent_sample[col] - min_val) / (max_val - min_val)
+            else:
+                recent_sample[col] = 0.5
+
+        avg_max /= divisor
+        avg_min /= divisor
+        # Convert the sample to a tensor
+        recent_sample = torch.tensor(recent_sample.values, dtype=torch.float32)
+        # split into input and target
+        input_sample = recent_sample[:self.input_height, 0:]
+        target_sample = recent_sample[self.input_height:, 0:]
+        return ((input_sample, target_sample), avg_max, avg_min)
+        
     def plot_and_save_image(self, ticker, save_path="./dataset_plots"):
 
         if ticker not in self.dataframes_dict:

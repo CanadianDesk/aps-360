@@ -51,7 +51,7 @@ class MCEWithDirectionPenalty(nn.Module):
         
         # Add penalty to the loss (scaled by penalty_factor)
         total_loss = mce_loss + self.penalty_factor * avg_direction_mismatch
-        
+
         return total_loss
 
 class EquityModel(nn.Module):

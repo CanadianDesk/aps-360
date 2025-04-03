@@ -28,7 +28,7 @@ def renormalize_tensor(tensor):
 
 def show_prediction(model, o_ht=1, ticker="AAPL"):
     # Do another quick test on the last sample window days of a stock
-    data, _max, _min = eqds.get_recent_input_tensror_for_ticker(ticker)
+    data, _max, _min = eqds.get_validation_input_tensor_for_ticker(ticker)
 
     model.to(device)
     prediction = model(data[0].unsqueeze(0).to(device))
@@ -114,184 +114,187 @@ def get_device():
 device = get_device()
 
 
-# def complex_model_accuracy(model, data_loader, num_days=7, output_height=1):
-#     # Simulates the performance of the model if it were to be used to
-#     # trade a portfolio of the stocks in data_loader over the next num_days
-
-#     MAX_NUM_DAYS = 30
-
-#     if num_days > MAX_NUM_DAYS:
-#         print(f"num_days cannot be greater than {MAX_NUM_DAYS}. Setting num_days to {MAX_NUM_DAYS}")
-#         num_days = MAX_NUM_DAYS
-
-#     model.to(device)
-#     num_stocks = len(data_loader.dataset) * 32
-#     print(f"DEBUG: num_stocks: {num_stocks}")
-
-#     copy_data_loader = copy.deepcopy(data_loader)
-#     portfolio = [1 / num_stocks] * num_stocks
-#     print(f"DEBUG: This should be 1: {sum(portfolio)}")
-#     sold_stocks = [0] * num_stocks
-
-#     # cash_in_hand = 0
-
-#     for day in range(num_days): # loop over num_days
-#         print(f"Simulating day {day+1}/{num_days}")
-        
-#         # Create a list to store updated batch data
-#         updated_data = []
-        
-#         for inputs, targets in copy_data_loader: # looping through batches
-#             inputs, targets = inputs.to(device), targets.to(device)
-#             with torch.no_grad():
-#                 outputs = model(inputs)
-
-
-#             for (i, output) in enumerate(outputs): # looping through individual stocks
-#                 # Skip stocks that have already been sold
-#                 if sold_stocks[i] == 1:
-#                     continue
-
-#                 # See if the max price over the next min(num_days, output_height) days is greater than the current price
-#                 todays_price = inputs[i][-1, 3].squeeze(0)  # Assuming index 3 is the Close price
-#                 future_prices = []
-
-#                 for future_day in range(min(num_days-day, output_height)):
-#                     future_prices.append(output[future_day, 3].squeeze(0))
-
-#                 # Check if max price is greater than today's price
-#                 if max(future_prices) > todays_price:
-#                     # Hold
-#                     # Change value in portfolio to scale by the price increase of one day
-#                     portfolio[i] *= (future_prices[0] / todays_price)
-#                     print(f"DEBUG: todays_price: {todays_price}")
-#                 else:
-#                     # Sell
-#                     # Freezes the value of the stock in the portfolio
-#                     sold_stocks[i] = 1
-#                     # TODO: add to cash_in_hand (this requires inversing the normalization of the data)
-
-#             # After processing this batch, store the updated inputs/targets for the next day
-#             for j in range(inputs.size(0)):
-#                 # Create new input by dropping oldest timepoint and adding first target timepoint
-#                 new_input = inputs[j, 1:, :].clone()  # Remove first day
-#                 first_target = targets[j, 0, :].unsqueeze(0)  # Get first target day
-#                 new_input = torch.cat([new_input, first_target], dim=0)  # Combine
-                
-#                 # Create new target by dropping the used day
-#                 # Since targets is always 30 days, we can safely remove the first day
-#                 new_target = targets[j, 1:, :].clone()
-                
-#                 updated_data.append((new_input, new_target))
-        
-#         #debug print
-#         print(f"DEBUG: Portfolio Sum: {sum(portfolio)}") 
-#         # print(f"DEBUG: Portfolio: {portfolio}")
-
-#         # Replace dataloader with updated data if this is not the last day
-#         if day < num_days - 1:
-#             # Create a new dataset from updated data
-#             copy_data_loader = DataLoader(
-#                 updated_data,
-#                 batch_size=copy_data_loader.batch_size,
-#                 shuffle=False  # Important: maintain original order
-#             )
-
-#     # Find the total return of the portfolio
-#     total = sum(portfolio)
-
-#     # Simulate for a 10k portfolio
-#     total_balance = 10000 + 10000 * total
-#     print(f"Simulated portfolio for {num_days} days:")
-#     print(f"Starting balance: 10k\nResulting balance: {total_balance}\n")
-#     print(f"Total return: {total_balance - 10000} for {total_balance/100:.2f}% return.")
-    
-#     return total
-
-
-def run_simulations(model, ticker_list, output_height, week_sim_count, day_sim_count, month_sim_count):
+def run_simulations(model, ticker_list, output_height, week_sim_count, day_sim_count, month_sim_count, return_acc=False, industry="technology"):
     print(f"Running {week_sim_count} week simulations, {day_sim_count} day simulations, and {month_sim_count} month simulations.")
 
     total_week_returns = 0
     total_day_returns = 0
     total_month_returns = 0
+
     average_week_returns = 0
     average_day_returns = 0
     average_month_returns = 0
 
+    avg_day_returns_list = []
+    avg_week_returns_list = []
+    avg_month_returns_list = []
+
     num_day_gains = 0
     num_month_gains = 0
     num_week_gains = 0
-    
 
+    total_day_cash_in_hand = 0
+    total_week_cash_in_hand = 0
+    total_month_cash_in_hand = 0
 
-    for day in range(day_sim_count):
-        # pick a random number between 5 and len(ticker_list)
-        print(f"Running day simulation {day+1}/{day_sim_count}")
-        num_stocks = torch.randint(5, len(ticker_list), (1,)).item()
-        indices = torch.randperm(len(ticker_list))[:num_stocks]
-        tickers_to_sim = [ticker_list [i] for i in indices]
+    average_day_cash_in_hand = 0
+    average_week_cash_in_hand = 0    
+    average_month_cash_in_hand = 0
 
-        trial_return = complex_model_accuracy_v2(model, tickers_to_sim, num_days=1, output_height=output_height)
-        total_day_returns += trial_return        
+    day_pos_gains = 0
+    week_pos_gains = 0
+    month_pos_gains = 0
 
-        if trial_return > 0:
-            num_day_gains += 1
-        
-    average_day_returns = total_day_returns / day_sim_count
-    print(f"Average daily return: {average_day_returns:.2f}")
+    if day_sim_count > 0:
+        for day in range(day_sim_count):
+            # pick a random number between 5 and len(ticker_list)
+            print(f"Running day simulation {day+1}/{day_sim_count}")
+            num_stocks = torch.randint(5, len(ticker_list), (1,)).item()
+            indices = torch.randperm(len(ticker_list))[:num_stocks]
+            tickers_to_sim = [ticker_list [i] for i in indices]
 
-    for week in range(week_sim_count):
-        # pick a random number between 5 and len(ticker_list)
-        print(f"Running week simulation {week+1}/{week_sim_count}")
-        num_stocks = torch.randint(5, len(ticker_list), (1,)).item()
-        indices = torch.randperm(len(ticker_list))[:num_stocks]
-        tickers_to_sim = [ticker_list [i] for i in indices]
+            trial_return, cash_in_hand = complex_model_accuracy(model, tickers_to_sim, num_days=1, output_height=output_height, industry=industry)
+            total_day_returns += trial_return      
+            avg_day_returns_list.append(trial_return)  
+            total_day_cash_in_hand += cash_in_hand
 
-        trial_return = complex_model_accuracy_v2(model, tickers_to_sim, num_days=7, output_height=output_height)
-        total_week_returns += trial_return
+            if trial_return > 0:
+                num_day_gains += 1
+            
+        average_day_returns = total_day_returns / day_sim_count
+        print(f"Average return after one day: {average_day_returns:.2f}")
+        average_day_cash_in_hand = total_day_cash_in_hand / day_sim_count
+        print(f"Average cash in hand after one day: {average_day_cash_in_hand:.2f}")
 
-        if trial_return > 0:
-            num_week_gains += 1
+    if week_sim_count > 0:
+        for week in range(week_sim_count):
+            # pick a random number between 5 and len(ticker_list)
+            print(f"Running week simulation {week+1}/{week_sim_count}")
+            num_stocks = torch.randint(5, len(ticker_list), (1,)).item()
+            indices = torch.randperm(len(ticker_list))[:num_stocks]
+            tickers_to_sim = [ticker_list [i] for i in indices]
 
-    average_week_returns = total_week_returns / week_sim_count
-    print(f"Average weekly return: {average_week_returns:.2f}")
+            trial_return, cash_in_hand = complex_model_accuracy(model, tickers_to_sim, num_days=7, output_height=output_height, industry=industry)
+            total_week_returns += trial_return
+            avg_week_returns_list.append(trial_return)
+            total_week_cash_in_hand += cash_in_hand
 
-    for month in range(month_sim_count):
-        # pick a random number between 5 and len(ticker_list)
-        print(f"Running month simulation {month+1}/{month_sim_count}")
-        num_stocks = torch.randint(5, len(ticker_list), (1,)).item()
-        indices = torch.randperm(len(ticker_list))[:num_stocks]
-        tickers_to_sim = [ticker_list [i] for i in indices]
+            if trial_return > 0:
+                num_week_gains += 1
 
-        trial_return = complex_model_accuracy_v2(model, tickers_to_sim, num_days=28, output_height=output_height)
-        total_month_returns += trial_return
+        average_week_returns = total_week_returns / week_sim_count
+        print(f"Average return after one week: {average_week_returns:.2f}")
+        average_week_cash_in_hand = total_week_cash_in_hand / week_sim_count
+        print(f"Average cash in hand after one week: {average_week_cash_in_hand:.2f}")
 
-        if trial_return > 0:
-            num_month_gains += 1
+    if month_sim_count > 0:
+        for month in range(month_sim_count):
+            # pick a random number between 5 and len(ticker_list)
+            print(f"Running month simulation {month+1}/{month_sim_count}")
+            num_stocks = torch.randint(5, len(ticker_list), (1,)).item()
+            indices = torch.randperm(len(ticker_list))[:num_stocks]
+            tickers_to_sim = [ticker_list [i] for i in indices]
 
-    average_month_returns = total_month_returns / month_sim_count
-    print(f"Average monthly return: {average_month_returns:.2f}")
+            trial_return, cash_in_hand = complex_model_accuracy(model, tickers_to_sim, num_days=28, output_height=output_height, industry=industry)
+            total_month_returns += trial_return
+            avg_month_returns_list.append(trial_return)
+            total_month_cash_in_hand += cash_in_hand
+
+            if trial_return > 0:
+                num_month_gains += 1
+
+        average_month_returns = total_month_returns / month_sim_count
+        print(f"Average return after one month: {average_month_returns:.2f}")
+        average_month_cash_in_hand = total_month_cash_in_hand / month_sim_count
+        print(f"Average cash in hand after one month: {average_month_cash_in_hand:.2f}")
 
     def annualize(returns, period_in_days):
         return (1 + returns) ** (365/period_in_days) - 1
     
-    annualized_daily_returns = annualize(average_day_returns, period_in_days=1)
-    print(f"Annualized average daily return: {annualized_daily_returns * 100:.2f}%")
-    annualized_weekly_returns = annualize(average_week_returns, period_in_days=7)
-    print(f"Annualized averageweekly return: {annualized_weekly_returns * 100:.2f}%")
-    annualized_monthly_returns = annualize(average_month_returns, period_in_days=28)
-    print(f"Annualized average monthly return: {annualized_monthly_returns * 100:.2f}%")
 
-    print(f"Percent positive gains in daily sims: {num_day_gains/day_sim_count * 100:.2f}%")
-    print(f"Percent positive gains in weekly sims: {num_week_gains/week_sim_count * 100:.2f}%")
-    print(f"Percent positive gains in monthly sims: {num_month_gains/month_sim_count * 100:.2f}%")
+    # PRINT RESULTS
+    print("\n\n" + "=" * 25 + " RESULTS for output height " + str(output_height) + " " + "=" * 25 + "\n\n")
 
+    # PRINT NON-ANNUALIZED RESULTS
+    if day_sim_count > 0:
+        print(f"Average return day-long simulations: {average_day_returns * 100:.2f}%")
+    if week_sim_count > 0:
+        print(f"Average return week-long simulations: {average_week_returns * 100:.2f}%")
+    if month_sim_count > 0:
+        print(f"Average return month-long simulations: {average_month_returns * 100:.2f}%")
+
+    # PRINT ANNUALIZED RESULTS
+    if day_sim_count > 0:
+        annualized_daily_returns = annualize(average_day_returns, period_in_days=1)
+        print(f"Annualized average return on day-long simulations: {annualized_daily_returns * 100:.2f}%")
+    if week_sim_count > 0:
+        annualized_weekly_returns = annualize(average_week_returns, period_in_days=7)
+        print(f"Annualized average return on week-long simulations: {annualized_weekly_returns * 100:.2f}%")
+    if month_sim_count > 0:
+        annualized_monthly_returns = annualize(average_month_returns, period_in_days=28)
+        print(f"Annualized average return on month-long simulations: {annualized_monthly_returns * 100:.2f}%")
+
+    # PRINT POSITIVE GAINS
+    if day_sim_count > 0:
+        day_pos_gains = num_day_gains/day_sim_count * 100
+        print(f"Percent positive gains in day-long sims: {day_pos_gains:.2f}% ({num_day_gains}/{day_sim_count})")
+    if week_sim_count > 0:
+        week_pos_gains = num_week_gains/week_sim_count * 100
+        print(f"Percent positive gains in week-long sims: {week_pos_gains:.2f}% ({num_week_gains}/{week_sim_count})")
+    if month_sim_count > 0:
+        month_pos_gains = num_month_gains/month_sim_count * 100
+        print(f"Percent positive gains in month-long sims: {month_pos_gains:.2f}% ({num_month_gains}/{month_sim_count})")
+
+    print("\n\n" + "=" * 25 + " END RESULTS " + "=" * 25)
+
+
+    num_figs = 0
+    if day_sim_count > 0:
+        num_figs += 1
+    if week_sim_count > 0:
+        num_figs += 1
+    if month_sim_count > 0:
+        num_figs += 1
+
+    plt.figure(figsize=(5*num_figs, 5))
+
+    if day_sim_count > 0:
+        plt.subplot(1, 3, 1)
+        plt.hist(np.array(avg_day_returns_list) * 100, bins=20, alpha=0.7, color='blue')
+        plt.axvline(average_day_returns * 100, color='red', linestyle='dashed', linewidth=2)
+        plt.title(f'Daily Returns (Avg: {average_day_returns * 100:.2f}%)')
+        plt.xlabel('Return (%)')
+        plt.ylabel('Frequency')
+
+    if week_sim_count > 0:
+        plt.subplot(1, 3, 2)
+        plt.hist(np.array(avg_week_returns_list) * 100, bins=20, alpha=0.7, color='green')
+        plt.axvline(average_week_returns * 100, color='red', linestyle='dashed', linewidth=2)
+        plt.title(f'Weekly Returns (Avg: {average_week_returns * 100:.2f}%)')
+        plt.xlabel('Return (%)')
+
+    if month_sim_count > 0:
+        plt.subplot(1, 3, 3)
+        plt.hist(np.array(avg_month_returns_list) * 100, bins=20, alpha=0.7, color='purple')
+        plt.axvline(average_month_returns * 100, color='red', linestyle='dashed', linewidth=2)
+        plt.title(f'Monthly Returns (Avg: {average_month_returns * 100:.2f}%)')
+        plt.xlabel('Return (%)')
+
+    plt.tight_layout()
+    plt.savefig(f'returns_histogram_output_height_{output_height}.png')
+    plt.show()    
+
+    if return_acc:
+        return day_pos_gains, week_pos_gains, month_pos_gains
     return annualized_daily_returns, annualized_weekly_returns, annualized_monthly_returns
 
-def complex_model_accuracy_v2(model, ticker_list, num_days=7, output_height=1):
-    MAX_NUM_DAYS = 29
+def complex_model_accuracy(model, ticker_list, num_days=7, output_height=1, industry="technology"):
+    MAX_NUM_DAYS = 28
     PORTFOLIO_STARTING_VALUE = 10000
+    CONFIDENCE_THRESHOLD = 0.005  # Only sell if predicted to drop more than 0.5%
+    MAX_ALLOCATION_PER_STOCK = 0.25  # Maximum 25% allocation to any stock
+    BUY_RESERVE_RATIO = 0.2  # Keep 20% of cash in reserve
+    
     if num_days > MAX_NUM_DAYS:
         print(f"num_days cannot be greater than {MAX_NUM_DAYS}. Setting num_days to {MAX_NUM_DAYS}")
         num_days = MAX_NUM_DAYS
@@ -299,89 +302,166 @@ def complex_model_accuracy_v2(model, ticker_list, num_days=7, output_height=1):
     model.to(device)
     num_stocks = len(ticker_list)
     portfolio = [1 / num_stocks * PORTFOLIO_STARTING_VALUE] * num_stocks
-    sold_stocks = set()
+    stock_positions = {ticker: portfolio[i] for i, ticker in enumerate(ticker_list)}
     cash_in_hand = 0
+    
+    # Dictionary to store predicted returns for better allocation decisions
+    predicted_returns = {ticker: 0 for ticker in ticker_list}
 
     ticker_to_data = {}
     max_vals = {}
     min_vals = {}
     for ticker in ticker_list:
-        ticker_to_data[ticker], max_vals[ticker], min_vals[ticker] = eqds.get_recent_input_tensror_for_ticker(ticker, target_window=MAX_NUM_DAYS)
+        ticker_to_data[ticker], max_vals[ticker], min_vals[ticker] = eqds.get_random_validation_day_input_tensor_for_ticker(ticker, target_window=MAX_NUM_DAYS, industry=industry)
+        #showimage
+        # show_tensor_image(ticker_to_data[ticker][0], title=ticker)
         ticker_to_data[ticker] = list(ticker_to_data[ticker])
+        
+    # Track daily portfolio values for performance metrics
+    daily_portfolio_values = [PORTFOLIO_STARTING_VALUE]
+    benchmark_values = [PORTFOLIO_STARTING_VALUE]  # Buy and hold benchmark
 
-    for day in range(num_days): # loop over num_days
-        # print(f"Simulating day {day+1}/{num_days}")
+    for day in range(num_days):
+        # Calculate benchmark (buy and hold) performance
+        if day > 0:
+            benchmark_total = 0
+            for i, ticker in enumerate(ticker_list):
+                initial_position = PORTFOLIO_STARTING_VALUE / num_stocks
+                current_price = ticker_to_data[ticker][0][-1, 3]
+                initial_price = ticker_to_data[ticker][0][-(day+1), 3]
+                if initial_price > 0:
+                    benchmark_total += initial_position * (current_price / initial_price)
+            benchmark_values.append(benchmark_total)
 
         for ticker in ticker_list:
-            
+            # Get current price information
             todays_price = ticker_to_data[ticker][0][-1, 3]
             tomorrows_price = ticker_to_data[ticker][1][0, 3]
-            future_prices_inferred = []
-
-            # run the inference
-            with torch.no_grad():
-                outputs = model(ticker_to_data[ticker][0].unsqueeze(0).to(device))
-
-            # show_tensor_image(ticker_to_data[ticker][0], title=f"{ticker}")
-            # show_tensor_image(ticker_to_data[ticker][0], title=f"{ticker}")
-
-            # populate future_prices with the prices for the next min(num_days, output_height) days
-            # from the inference
-            for future_day in range(min(num_days-day, output_height)):
-                future_prices_inferred.append(outputs[0, future_day, 3].squeeze(0))
-
-            # check if max price is greater than today's price
+            
+            # Denormalize prices
             todays_price_denormalized = todays_price * (max_vals[ticker] - min_vals[ticker]) + min_vals[ticker]
             tomorrows_price_denormalized = tomorrows_price * (max_vals[ticker] - min_vals[ticker]) + min_vals[ticker]
 
-            if max(future_prices_inferred) > todays_price:
+            # Run the inference for future prices
+            with torch.no_grad():
+                outputs = model(ticker_to_data[ticker][0].unsqueeze(0).to(device))
 
-                if ticker not in sold_stocks:
-                    # hold
-                    # get the price increase percentage of one day
-                    change_ratio = tomorrows_price_denormalized / todays_price_denormalized
-                    #increase portfolio value
-                    portfolio[ticker_list.index(ticker)] *= change_ratio
-
-                #see if buying is good
-                #check if there is cash in hand
-                if cash_in_hand > 0:
-                    #divide the cash in hand by the number of stocks sold
-                    cash_to_spend = cash_in_hand / len(sold_stocks)
-                    portfolio[ticker_list.index(ticker)] += cash_to_spend
-                    cash_in_hand -= cash_to_spend
-                    if ticker in sold_stocks:
-                        sold_stocks.remove(ticker)
+            # Calculate weighted average of predicted future prices
+            future_prices_denormalized = []
+            weights = []
+            # Assign decreasing weights to predictions further in the future
+            for future_day in range(min(num_days-day, output_height)):
+                predicted_price = outputs[0, future_day, 3].item()
+                predicted_price_denormalized = predicted_price * (max_vals[ticker] - min_vals[ticker]) + min_vals[ticker]
+                future_prices_denormalized.append(predicted_price_denormalized)
+                weights.append(1.0 / (future_day + 1))  # Higher weight for nearer predictions
+            
+            if not future_prices_denormalized:
+                continue
+                
+            # Calculate weighted average prediction
+            weighted_future_price = sum(p * w for p, w in zip(future_prices_denormalized, weights)) / sum(weights)
+            
+            # Calculate expected return
+            expected_return = (weighted_future_price / todays_price_denormalized) - 1
+            predicted_returns[ticker] = expected_return
+            
+            # Decision making with improved logic
+            if expected_return > CONFIDENCE_THRESHOLD:
+                # Buy or hold decision
+                change_ratio = tomorrows_price_denormalized / todays_price_denormalized
+                
+                # Update existing position if we have one
+                if stock_positions[ticker] > 0:
+                    stock_positions[ticker] *= change_ratio
             else:
-                # sell
-                sold_stocks.add(ticker)
-                cash_in_hand += portfolio[ticker_list.index(ticker)]
-                portfolio[ticker_list.index(ticker)] = 0
+                # Sell decision - if we expect return below threshold, sell the position
+                if stock_positions[ticker] > 0:
+                    cash_in_hand += stock_positions[ticker]
+                    stock_positions[ticker] = 0
 
+        # Allocate cash to stocks with positive predicted returns
+        if cash_in_hand > 0:
+            # Sort stocks by expected return (highest first)
+            buy_candidates = [(t, r) for t, r in predicted_returns.items() if r > CONFIDENCE_THRESHOLD]
+            buy_candidates.sort(key=lambda x: x[1], reverse=True)
+            
+            # Calculate total portfolio value for allocation constraints
+            total_portfolio_value = sum(stock_positions.values()) + cash_in_hand
+            
+            # Keep some cash in reserve
+            cash_to_deploy = cash_in_hand * (1 - BUY_RESERVE_RATIO)
+            cash_in_hand -= cash_to_deploy
+            
+            for ticker, _ in buy_candidates:
+                # Check maximum allocation constraint
+                max_allowed = total_portfolio_value * MAX_ALLOCATION_PER_STOCK
+                current_allocation = stock_positions[ticker]
+                
+                # Skip if already at max allocation
+                if current_allocation >= max_allowed:
+                    continue
+                
+                # Calculate how much we can add to this position
+                available_allocation = max_allowed - current_allocation
+                amount_to_buy = min(cash_to_deploy, available_allocation)
+                
+                if amount_to_buy > 0:
+                    stock_positions[ticker] += amount_to_buy
+                    cash_to_deploy -= amount_to_buy
+                    
+                # If we've deployed all available cash, break
+                if cash_to_deploy <= 0:
+                    break
+            
+            # Return any unallocated cash to our reserve
+            cash_in_hand += cash_to_deploy
 
-        # after processing, need to update the ticker_to_data dictionary to
-        # shift data by one day
+        # Update portfolio dictionary from stock_positions
+        portfolio = [stock_positions[ticker] for ticker in ticker_list]
+            
+        # Track daily portfolio value
+        daily_portfolio_values.append(sum(portfolio) + cash_in_hand)
+
+        # After processing, update the ticker_to_data dictionary to shift data by one day
         for ticker in ticker_list:
-
-            # print(f"INITIAL DATA: {ticker_to_data[ticker][0]}")
-            # drop the first day in the input
+            # Drop the first day in the input
             ticker_to_data[ticker][0] = ticker_to_data[ticker][0][1:, :]
-
-            # print(f"FIRST DAY DROPPED DATA: {ticker_to_data[ticker][0]}")
-            # add the first day in the target to the end of the input
+            # Add the first day in the target to the end of the input
             ticker_to_data[ticker][0] = torch.cat((ticker_to_data[ticker][0], ticker_to_data[ticker][1][0].unsqueeze(0)), dim=0)
-            # drop the first day in the target
-            ticker_to_data[ticker][1] = ticker_to_data[ticker][1][1:].squeeze(0)
-            # print(f"UPDATED DATA: {ticker_to_data[ticker][0]}")
+            # Drop the first day in the target
+            ticker_to_data[ticker][1] = ticker_to_data[ticker][1][1:, :]
+            # Handle case when target becomes empty
+            if ticker_to_data[ticker][1].size(0) == 0:
+                ticker_to_data[ticker][1] = torch.zeros((0, ticker_to_data[ticker][0].size(1)))
     
+    # Calculate final results
     total_balance = sum(portfolio) + cash_in_hand
+    
+    # Calculate Sharpe ratio (simplified)
+    if len(daily_portfolio_values) > 1:
+        daily_returns = [(daily_portfolio_values[i] / daily_portfolio_values[i-1]) - 1 for i in range(1, len(daily_portfolio_values))]
+        avg_daily_return = sum(daily_returns) / len(daily_returns)
+        std_daily_return = (sum((r - avg_daily_return) ** 2 for r in daily_returns) / len(daily_returns)) ** 0.5
+        sharpe_ratio = (avg_daily_return / std_daily_return) * (252 ** 0.5) if std_daily_return > 0 else 0
+    else:
+        sharpe_ratio = 0
+    
+    # Print results
     print(f"Simulated portfolio for {num_days} days:")
     print(f"Starting balance: ${PORTFOLIO_STARTING_VALUE:.2f}\nResulting balance: ${total_balance:.2f}\n")
     print(f"Total in stocks: ${sum(portfolio):.2f}. Total in cash: ${cash_in_hand:.2f}")
     print(f"Total return: ${(total_balance - PORTFOLIO_STARTING_VALUE):.2f} for {((total_balance - PORTFOLIO_STARTING_VALUE) / PORTFOLIO_STARTING_VALUE) * 100:.2f}% return.")
-    return (total_balance - PORTFOLIO_STARTING_VALUE) / PORTFOLIO_STARTING_VALUE
-
-
+    
+    # Compare against buy-and-hold benchmark
+    if benchmark_values[-1] > 0:
+        benchmark_return = (benchmark_values[-1] - PORTFOLIO_STARTING_VALUE) / PORTFOLIO_STARTING_VALUE
+        print(f"Buy & Hold return: {benchmark_return * 100:.2f}%")
+        print(f"Strategy outperformance: {((total_balance/PORTFOLIO_STARTING_VALUE) - (benchmark_values[-1]/PORTFOLIO_STARTING_VALUE)) * 100:.2f}%")
+    
+    print(f"Sharpe ratio: {sharpe_ratio:.2f}")
+    
+    return ((total_balance - PORTFOLIO_STARTING_VALUE) / PORTFOLIO_STARTING_VALUE), cash_in_hand
 
 def get_model_accuracy(model, data_loader, output_height=1):
     model.to(device)
@@ -418,7 +498,7 @@ def get_model_accuracy(model, data_loader, output_height=1):
                 
     return (correct_trades / total_trades)
 
-def train_model(model, train_loader, val_loader, num_epochs=10, lr=0.0001, output_height=1, _pf=0.3):
+def train_model(model, train_loader, val_loader, num_epochs=10, lr=0.0001, output_height=1, _pf=0.3, ticker_list=None, industry="technology"):
     model.to(device)
     # criterion = nn.MSELoss()
     criterion = MCEWithDirectionPenalty(penalty_factor=_pf)
@@ -462,19 +542,21 @@ def train_model(model, train_loader, val_loader, num_epochs=10, lr=0.0001, outpu
                 val_loss += loss.item()
         validation_losses.append(val_loss / len(val_loader))
         validation_accuracies.append(get_model_accuracy(model, val_loader, output_height=output_height))
+        # validation_acc, _, _ = run_simulations(model, ticker_list, output_height=output_height, day_sim_count=100, week_sim_count=0, month_sim_count=0, return_acc=True)
+        # validation_accuracies.append(validation_acc)
 
         if validation_losses[-1] < best_val_loss:
             best_val_loss = validation_losses[-1]
             # Save the model if validation loss improves
             if not os.path.exists("./cached_models"):
                 os.makedirs("./cached_models")
-            torch.save(model.state_dict(), "./cached_models/best_loss_equitymodel.pth")
+            torch.save(model.state_dict(), f"./cached_models/best_loss_equitymodel_{industry}.pth")
         if validation_accuracies[-1] > best_val_accuracy:
             best_val_accuracy = validation_accuracies[-1]
             # Save the model if validation accuracy improves
             if not os.path.exists("./cached_models"):
                 os.makedirs("./cached_models")
-            torch.save(model.state_dict(), "./cached_models/best_accuracy_equitymodel.pth")
+            torch.save(model.state_dict(), f"./cached_models/best_accuracy_equitymodel_{industry}.pth")
         
         # Print statistics
         print(f"Epoch [{epoch+1}] | Training Loss: {training_losses[-1]:.4f} | Validation Loss: {validation_losses[-1]:.4f} | Validation Accuracy: {validation_accuracies[-1]:.4f} | Training Accuracy: {training_accuracies[-1]:.4f}")
@@ -482,7 +564,7 @@ def train_model(model, train_loader, val_loader, num_epochs=10, lr=0.0001, outpu
     return training_losses, validation_losses, validation_accuracies, training_accuracies
         
 
-def main(train=True, tickers=None, sim_tickers=None):
+def main(train=True, show_predictions=True, tickers=None, sim_tickers=None):
     # note that the input height muse be 256 times the output height
     torch.manual_seed(0)
     np.random.seed(0)
@@ -490,14 +572,15 @@ def main(train=True, tickers=None, sim_tickers=None):
     # convolutional_layers = [4, 16, 64, 256, 32, 16, 8, 4] # this works well
 
     # if the below are changed the cached data loaders must be cleared manually rn
-    convolutional_layers = [4, 16, 32, 128, 256, 64, 32, 4]
-    # convolutional_layers = [16, 64, 128, 64, 16]
-    o_ht = 1
+    # convolutional_layers = [4, 16, 32, 128, 256, 64, 32, 4] #output height = 1
+    convolutional_layers = [32, 128, 256, 128, 32] #output height = 8
+    o_ht = 8
     i_ht = o_ht * (2**len(convolutional_layers))
-    # below this should be ok
 
+    # below this should be ok
+    industry = "energy"
     eqds = EquityDataset(input_height=i_ht, output_height=o_ht, include_industry_specific=True, normalize=False)
-    train_loader, val_loader, test_loader = eqds.construct_data_loaders(industry="technology", sample_stride=4, batch_size=32)
+    train_loader, val_loader, test_loader = eqds.construct_data_loaders(industry=industry, sample_stride=4, batch_size=32)
     model = EquityModel(width_k_bar=18, kernel_size=5, input_height=i_ht, output_height=o_ht, conv_out_channel_list=convolutional_layers, pool_type='avg')
     
     # print(train_loader.dataset[0][0].shape)
@@ -511,7 +594,7 @@ def main(train=True, tickers=None, sim_tickers=None):
     # print("Test set size:", len(test_loader.dataset))
 
     if train:
-        tl, vl, va, ta = train_model(model, train_loader, val_loader, num_epochs=10, lr=0.0001, output_height=o_ht, _pf=0.05)
+        tl, vl, va, ta = train_model(model, train_loader, val_loader, num_epochs=10, lr=0.0001, output_height=o_ht, _pf=0.05, ticker_list=sim_tickers, industry=industry)
         # Plot training and validation loss
         plt.figure(figsize=(10, 5))
         plt.plot(tl, label='Training Loss', color='blue')
@@ -533,19 +616,21 @@ def main(train=True, tickers=None, sim_tickers=None):
         plt.grid()
         plt.show()
 
-    best_model = torch.load("./cached_models/best_accuracy_equitymodel.pth")
+    best_model = torch.load(f"./cached_models/best_accuracy_equitymodel_{industry}.pth")
     model.load_state_dict(best_model)
 
     # test_accuracy = complex_model_accuracy(model, test_loader, num_days=7, output_height=o_ht)
     # test_accuracy = complex_model_accuracy_v2(model, tickers, num_days=7, output_height=o_ht)
-    run_simulations(model, sim_tickers, output_height=o_ht, week_sim_count=20, day_sim_count=20, month_sim_count=20)
 
-    for ticker in tickers:
-        print(f"Testing {ticker}...")
-        show_prediction(model, o_ht, ticker)
-        # Uncomment below to get accuracy on test set
-        # test_accuracy = get_model_accuracy(model, test_loader, output_height=o_ht)
-        # print(f"Test Accuracy: {100*test_accuracy}%")
+    run_simulations(model, sim_tickers, output_height=o_ht, week_sim_count=0, day_sim_count=0, month_sim_count=150, industry=industry)
+
+    if show_predictions:
+        for ticker in tickers:
+            print(f"Testing {ticker}...")
+            show_prediction(model, o_ht, ticker)
+            # Uncomment below to get accuracy on test set
+            # test_accuracy = get_model_accuracy(model, test_loader, output_height=o_ht)
+            # print(f"Test Accuracy: {100*test_accuracy}%")
 
     # test_accuracy = get_model_accuracy(model, test_loader, output_height=o_ht)
     # print(f"Test Accuracy: {100*test_accuracy}%")
@@ -566,5 +651,13 @@ if __name__ == "__main__":
         "HDB", "HSBC", "INTU", "JPM", "KKR", "META", "MMC", "MS", 
         "MSFT", "MU", "MUFG", "NOW", "NVDA", "ORCL", "PGR", "PLD", 
         "RY", "SCHW", "SMFG", "TD", "TSLA", "TXN", "UBS", "WFC"
-    ]    
-    main(False, tickers=charles_portfolio, sim_tickers=tickers_to_test)
+    ]
+    temp = [
+        "BX", "META", "HSBC", "JPM", "AXP", "CSCO", "NOW", "TXN"
+    ]
+
+    energy_tickers = [
+        "COP", "CVX", "DVN", "EOG", "HAL", "KMI", "MPC", "OKE", "OXY", "PSX", "SLB", 
+        "VLO", "WMB", "XOM", "BKR"
+    ]
+    main(train=False, show_predictions=False, tickers=charles_portfolio, sim_tickers=energy_tickers)
